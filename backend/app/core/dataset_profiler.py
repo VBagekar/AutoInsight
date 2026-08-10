@@ -10,7 +10,8 @@ class LocalDatasetProfiler:
 
     def profile_csv(self, file_contents: bytes, filename: str, dataframe: pd.DataFrame | None = None,
                     kpi_keywords: Optional[List[str]] = None,
-                    geo_keywords: Optional[List[str]] = None) -> Dict[str, Any]:
+                    geo_keywords: Optional[List[str]] = None,
+                    cleaning_report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Parses a CSV dataset locally using Pandas/NumPy, extracting a rich,
         compact JSON summary to send to NVIDIA Nemotron without sending raw files.
@@ -189,6 +190,84 @@ class LocalDatasetProfiler:
             "extracted_chart_data": extracted_chart_data,
             "quality_score": round(float((1 - df.isnull().mean().mean()) * 100), 1)
         }
+
+        # If a cleaning report is supplied, attach a human‑readable cleaning summary
+        # and a detailed quality‑score breakdown.
+        if cleaning_report is not None:
+            # ---- cleaning_summary ----
+            missing_handled = cleaning_report.get("missing_values_handled", {})
+            imputation_used = cleaning_report.get("imputation_strategy_used", {})
+            high_missing = cleaning_report.get("high_missing_flagged", [])
+            outlier_treat = cleaning_report.get("outlier_treatment", {})
+
+            imputation_details = []
+            for col, miss_cnt in missing_handled.items():
+                if col in high_missing:
+                    pct = round(miss_cnt / cleaning_report["initial_rows"] * 100, 1)
+                    imputation_details.append(f"{col}: {pct}% missing — left as-is, flagged for review")
+                else:
+                    strategy = imputation_used.get(col, "median")
+                    friendly = {
+                        "forward_fill": "forward-filled",
+                        "median": "median-imputed",
+                        "mode": "mode-imputed",
+                        "skipped_high_missing": "left as-is, flagged for review"
+                    }.get(strategy, strategy)
+                    imputation_details.append(f"{col}: {friendly} ({miss_cnt} missing values)")
+
+            high_missing_details = [
+                f"{col}: {round(cleaning_report['missing_values_handled'][col] / cleaning_report['initial_rows'] * 100, 1)}% missing — left as-is, flagged for review"
+                for col in high_missing
+            ]
+
+            outlier_details = []
+            for col, info in outlier_treat.items():
+                cnt = info.get("count", 0)
+                action = info.get("action", "none")
+                if cnt and action != "none":
+                    if action == "winsorized_1_99":
+                        outlier_details.append(f"{col}: {cnt} outliers capped at 1st/99th percentile")
+                    else:
+                        outlier_details.append(f"{col}: {cnt} outliers treated ({action})")
+
+            cleaning_summary = {
+                "rows_before": cleaning_report.get("initial_rows"),
+                "rows_after": cleaning_report.get("cleaned_rows"),
+                "duplicates_removed": cleaning_report.get("duplicates_removed"),
+                "imputation_details": imputation_details,
+                "high_missing_flagged": high_missing_details,
+                "outlier_treatment_details": outlier_details
+            }
+            summary["cleaning_summary"] = cleaning_summary
+
+            # ---- quality_score_breakdown ----
+            # completeness: 100 - average missing %
+            avg_missing = sum(col["missing_pct"] for col in columns_info) / len(columns_info) if columns_info else 0
+            completeness = max(0.0, 100.0 - avg_missing)
+
+            # consistency: proportion of numeric columns without outlier treatment
+            treated_cols = sum(1 for info in outlier_treat.values() if info.get("action") != "none" and info.get("count", 0) > 0)
+            total_numeric = len(numeric_cols) if numeric_cols else 1
+            consistency = max(0.0, 100.0 * (1.0 - treated_cols / total_numeric))
+
+            # type_confidence: average of kpi_confidence, geo_confidence, date confidence (1.0)
+            conf_vals = []
+            for col_meta in columns_info:
+                if "kpi_confidence" in col_meta:
+                    conf_vals.append(col_meta["kpi_confidence"])
+                elif "geo_confidence" in col_meta:
+                    conf_vals.append(col_meta["geo_confidence"])
+                elif col_meta.get("semantic_role") == "date":
+                    conf_vals.append(1.0)
+                else:
+                    conf_vals.append(0.0)
+            type_confidence = (sum(conf_vals) / len(conf_vals) * 100) if conf_vals else 0.0
+
+            summary["quality_score_breakdown"] = {
+                "completeness": round(completeness, 1),
+                "consistency": round(consistency, 1),
+                "type_confidence": round(type_confidence, 1)
+            }
 
         return summary
 
