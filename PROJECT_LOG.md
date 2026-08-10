@@ -54,4 +54,5 @@
 | Date | Action | Details |
 |------|--------|---------|
 | 2026-08-10 | Refactor data cleaner with column‑aware strategies | Implemented median → forward‑fill for numeric time‑series columns, skip imputation & flag categorical columns with >40 % missing, winsorize outliers at 1st/99th percentile (optional treat_outliers flag), and extended cleaning report with imputation_strategy_used, high_missing_flagged, and outlier_treatment per column. |
+| 2026-08-10 | Person 1 – Task 2: confidence‑scored KPI/geo detection | Added configurable kpi_keywords / geo_keywords parameters to profile_csv(). KPI detection now combines keyword match (0.6) and statistical signal (unique_ratio < 0.95 and not a date column) (0.4) into a kpi_confidence (0–1) per numeric column; both signals give 1.0. Geo detection keeps keyword match = 1.0, plus fallback pattern match (2/3‑letter codes or common country names) = 0.5. Each column's col_meta now includes kpi_confidence (numeric) or geo_confidence (categorical) alongside semantic_role. Date detection unchanged. |
 *Add future entries below this line.*
