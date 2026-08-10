@@ -53,6 +53,5 @@
 
 | Date | Action | Details |
 |------|--------|---------|
-| 2026-08-10 | Created project log file | Initial snapshot recorded (this file). |
-
+| 2026-08-10 | Refactor data cleaner with column‑aware strategies | Implemented median → forward‑fill for numeric time‑series columns, skip imputation & flag categorical columns with >40 % missing, winsorize outliers at 1st/99th percentile (optional treat_outliers flag), and extended cleaning report with imputation_strategy_used, high_missing_flagged, and outlier_treatment per column. |
 *Add future entries below this line.*
