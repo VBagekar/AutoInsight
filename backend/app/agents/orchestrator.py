@@ -32,7 +32,7 @@ class MasterOrchestrator:
             raise ValueError("The uploaded dataset has no rows.")
 
         cleaned_df, cleaning_report = data_cleaner.clean_dataset(raw_df)
-        summary = dataset_profiler.profile_csv(file_bytes, filename, cleaned_df)
+        summary = dataset_profiler.profile_csv(file_bytes, filename, cleaned_df, cleaning_report=cleaning_report)
         dataset_id = str(uuid4())
         self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report}
 
