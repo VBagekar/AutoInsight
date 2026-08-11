@@ -24,6 +24,35 @@ class MasterOrchestrator:
         # deployment should replace this with object storage + a database.
         self.datasets: Dict[str, Dict[str, Any]] = {}
 
+    def _detect_schema_drift(self, filename: str, new_df: pd.DataFrame) -> Dict[str, Any] | None:
+        """Compare new dataframe columns against existing dataset with same filename."""
+        for ds in self.datasets.values():
+            if ds.get("filename") == filename:
+                old_df = ds["df"]
+                old_cols = set(old_df.columns)
+                new_cols = set(new_df.columns)
+                
+                columns_added = sorted(list(new_cols - old_cols))
+                columns_removed = sorted(list(old_cols - new_cols))
+                
+                columns_type_changed = []
+                for col in sorted(old_cols & new_cols):
+                    old_dtype = str(old_df[col].dtype)
+                    new_dtype = str(new_df[col].dtype)
+                    if old_dtype != new_dtype:
+                        columns_type_changed.append({
+                            "column": col,
+                            "old_type": old_dtype,
+                            "new_type": new_dtype
+                        })
+                
+                return {
+                    "columns_added": columns_added,
+                    "columns_removed": columns_removed,
+                    "columns_type_changed": columns_type_changed
+                }
+        return None
+
     def process_file_and_generate_initial_dashboard(self, file_bytes: bytes, filename: str, sheet_name: str | None = None) -> Dict[str, Any]:
         suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         available_sheets: list[str] = []
@@ -48,6 +77,9 @@ class MasterOrchestrator:
         if raw_df.empty:
             raise ValueError("The uploaded dataset has no rows.")
 
+        # Schema drift detection (compare raw columns before cleaning)
+        schema_drift = self._detect_schema_drift(filename, raw_df)
+
         cleaned_df, cleaning_report = data_cleaner.clean_dataset(raw_df)
         
         # For profiling large datasets, use a random sample
@@ -67,7 +99,7 @@ class MasterOrchestrator:
             total_rows=len(cleaned_df)
         )
         dataset_id = str(uuid4())
-        self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report, "sheet_name": target_sheet if suffix in {"xlsx", "xls"} else None}
+        self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report, "sheet_name": target_sheet if suffix in {"xlsx", "xls"} else None, "filename": filename}
 
         charts = []
         for index, spec in enumerate(dashboard_builder.default_plan(summary)):
@@ -82,6 +114,7 @@ class MasterOrchestrator:
             "forecast": forecast,
             "ai_insights": self._initial_insights(summary, cleaning_report, charts),
             "available_sheets": available_sheets,
+            "schema_drift": schema_drift,
         }
 
     def _initial_insights(self, summary: Dict[str, Any], cleaning: Dict[str, Any], charts: list[Dict[str, Any]]) -> list[str]:
