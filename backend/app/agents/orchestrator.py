@@ -20,12 +20,16 @@ class MasterOrchestrator:
         # deployment should replace this with object storage + a database.
         self.datasets: Dict[str, Dict[str, Any]] = {}
 
-    def process_file_and_generate_initial_dashboard(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
+    def process_file_and_generate_initial_dashboard(self, file_bytes: bytes, filename: str, sheet_name: str | None = None) -> Dict[str, Any]:
         suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        available_sheets: list[str] = []
         if suffix == "csv":
             raw_df = pd.read_csv(BytesIO(file_bytes))
         elif suffix in {"xlsx", "xls"}:
-            raw_df = pd.read_excel(BytesIO(file_bytes))
+            excel_file = pd.ExcelFile(BytesIO(file_bytes))
+            available_sheets = excel_file.sheet_names
+            target_sheet = sheet_name if sheet_name in available_sheets else available_sheets[0]
+            raw_df = pd.read_excel(excel_file, sheet_name=target_sheet)
         else:
             raise ValueError("Please upload a CSV or Excel (.xlsx/.xls) file.")
         if raw_df.empty:
@@ -34,7 +38,7 @@ class MasterOrchestrator:
         cleaned_df, cleaning_report = data_cleaner.clean_dataset(raw_df)
         summary = dataset_profiler.profile_csv(file_bytes, filename, cleaned_df, cleaning_report=cleaning_report)
         dataset_id = str(uuid4())
-        self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report}
+        self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report, "sheet_name": target_sheet if suffix in {"xlsx", "xls"} else None}
 
         charts = []
         for index, spec in enumerate(dashboard_builder.default_plan(summary)):
@@ -48,6 +52,7 @@ class MasterOrchestrator:
             "cleaning_report": cleaning_report, "charts": charts, "kpi_summary": kpis,
             "forecast": forecast,
             "ai_insights": self._initial_insights(summary, cleaning_report, charts),
+            "available_sheets": available_sheets,
         }
 
     def _initial_insights(self, summary: Dict[str, Any], cleaning: Dict[str, Any], charts: list[Dict[str, Any]]) -> list[str]:
