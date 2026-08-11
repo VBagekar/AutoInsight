@@ -90,7 +90,10 @@ class LocalDatasetProfiler:
                     kpi_keywords: Optional[List[str]] = None,
                     geo_keywords: Optional[List[str]] = None,
                     cleaning_report: Optional[Dict[str, Any]] = None,
-                    mask_pii: bool = False) -> Dict[str, Any]:
+                    mask_pii: bool = False,
+                    was_sampled: bool = False,
+                    sample_size: int = 0,
+                    total_rows: int = 0) -> Dict[str, Any]:
         """
         Parses a CSV dataset locally using Pandas/NumPy, extracting a rich,
         compact JSON summary to send to NVIDIA Nemotron without sending raw files.
@@ -268,9 +271,11 @@ class LocalDatasetProfiler:
                 pass
 
         # High-level Summary object
+        # Use total_rows if provided (for sampled profiling), otherwise use actual dataframe row count
+        effective_row_count = total_rows if total_rows > 0 else row_count
         summary = {
             "filename": filename,
-            "row_count": row_count,
+            "row_count": effective_row_count,
             "column_count": col_count,
             "columns": columns_info,
             "numeric_columns": numeric_cols,
@@ -283,6 +288,9 @@ class LocalDatasetProfiler:
             "quality_score": round(float((1 - df.isnull().mean().mean()) * 100), 1),
             "pii_flags": pii_flags,
         }
+        if was_sampled:
+            summary["was_sampled"] = True
+            summary["sample_size"] = sample_size
         if masked_preview:
             summary["masked_preview"] = masked_preview
 

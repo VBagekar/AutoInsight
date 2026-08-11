@@ -13,6 +13,10 @@ from app.core.dashboard_builder import dashboard_builder
 from app.core.llm_client import nemotron_client
 from app.agents.forecast_agent import forecasting_agent
 
+LARGE_FILE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB
+PROFILE_SAMPLE_MAX_ROWS = 200_000
+CHUNK_SIZE = 100_000
+
 
 class MasterOrchestrator:
     def __init__(self) -> None:
@@ -23,20 +27,45 @@ class MasterOrchestrator:
     def process_file_and_generate_initial_dashboard(self, file_bytes: bytes, filename: str, sheet_name: str | None = None) -> Dict[str, Any]:
         suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         available_sheets: list[str] = []
+        target_sheet = None
+        is_large_file = len(file_bytes) > LARGE_FILE_THRESHOLD_BYTES
+        
         if suffix == "csv":
-            raw_df = pd.read_csv(BytesIO(file_bytes))
+            if is_large_file:
+                chunks = pd.read_csv(BytesIO(file_bytes), chunksize=CHUNK_SIZE)
+                raw_df = pd.concat(chunks, ignore_index=True)
+            else:
+                raw_df = pd.read_csv(BytesIO(file_bytes))
         elif suffix in {"xlsx", "xls"}:
             excel_file = pd.ExcelFile(BytesIO(file_bytes))
             available_sheets = excel_file.sheet_names
             target_sheet = sheet_name if sheet_name in available_sheets else available_sheets[0]
             raw_df = pd.read_excel(excel_file, sheet_name=target_sheet)
+            # Excel: openpyxl loads fully; sampling for profiling only if large
+            is_large_file = len(file_bytes) > LARGE_FILE_THRESHOLD_BYTES
         else:
             raise ValueError("Please upload a CSV or Excel (.xlsx/.xls) file.")
         if raw_df.empty:
             raise ValueError("The uploaded dataset has no rows.")
 
         cleaned_df, cleaning_report = data_cleaner.clean_dataset(raw_df)
-        summary = dataset_profiler.profile_csv(file_bytes, filename, cleaned_df, cleaning_report=cleaning_report)
+        
+        # For profiling large datasets, use a random sample
+        profile_df = cleaned_df
+        was_sampled = False
+        sample_size = len(cleaned_df)
+        if is_large_file and len(cleaned_df) > PROFILE_SAMPLE_MAX_ROWS:
+            profile_df = cleaned_df.sample(n=PROFILE_SAMPLE_MAX_ROWS, random_state=42)
+            was_sampled = True
+            sample_size = len(profile_df)
+        
+        summary = dataset_profiler.profile_csv(
+            file_bytes, filename, profile_df, 
+            cleaning_report=cleaning_report,
+            was_sampled=was_sampled,
+            sample_size=sample_size,
+            total_rows=len(cleaned_df)
+        )
         dataset_id = str(uuid4())
         self.datasets[dataset_id] = {"df": cleaned_df, "summary": summary, "cleaning_report": cleaning_report, "sheet_name": target_sheet if suffix in {"xlsx", "xls"} else None}
 
