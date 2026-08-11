@@ -1,9 +1,76 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 
 class AutomatedDataCleaner:
-    def clean_dataset(self, df: pd.DataFrame, treat_outliers: bool = True) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    def __init__(self):
+        self._default_synonym_map = {
+            "usa": "United States",
+            "u.s.a.": "United States",
+            "us": "United States",
+            "uk": "United Kingdom",
+            "u.k.": "United Kingdom",
+        }
+
+    def _normalize_categories(self, df: pd.DataFrame, synonym_map: Optional[Dict[str, str]]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """Normalize categorical columns: trim whitespace, unify casing, apply synonym map."""
+        report = {}
+        if synonym_map is None:
+            synonym_map = self._default_synonym_map
+
+        for col in df.columns:
+            if not (pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object):
+                continue
+            non_null = df[col].dropna()
+            if non_null.empty:
+                continue
+
+            original_vals = non_null.astype(str)
+            # 1. Trim whitespace
+            trimmed = original_vals.str.strip()
+            # 2. Canonical casing: use most frequent trimmed form for each lowercased value
+            lowered = trimmed.str.lower()
+            canonical_map = lowered.groupby(lowered).apply(
+                lambda s: trimmed.loc[s.index].mode().iloc[0] if not trimmed.loc[s.index].mode().empty else s.iloc[0]
+            )
+            # Build mapping from trimmed to canonical
+            trim_to_canonical = {orig: canonical_map.get(orig.lower(), orig) for orig in trimmed.unique()}
+            # Apply canonical casing
+            normalized = trimmed.map(trim_to_canonical)
+
+            # 3. Synonym map for country-ish columns
+            col_lower = col.lower()
+            is_countryish = any(kw in col_lower for kw in ["country", "nation", "region"])
+            if not is_countryish:
+                # Heuristic: check if >30% of unique non-null values match synonym keys (case-insensitive)
+                unique_vals = normalized.unique()
+                matches = sum(1 for v in unique_vals if v.lower() in synonym_map)
+                if len(unique_vals) > 0 and matches / len(unique_vals) >= 0.3:
+                    is_countryish = True
+
+            if is_countryish:
+                # Apply synonym map case-insensitively
+                def apply_synonym(v):
+                    return synonym_map.get(v.lower(), v)
+                normalized = normalized.apply(apply_synonym)
+
+            # Count changes
+            changed_mask = (original_vals != normalized)
+            if changed_mask.any():
+                changed_indices = changed_mask[changed_mask].index
+                examples = []
+                for idx in changed_indices[:5]:
+                    examples.append({"before": original_vals.loc[idx], "after": normalized.loc[idx]})
+                df[col] = df[col].astype(object)
+                df.loc[changed_indices, col] = normalized.loc[changed_indices].values
+                report[col] = {
+                    "values_normalized": int(changed_mask.sum()),
+                    "examples": examples,
+                }
+
+        return df, report
+
+    def clean_dataset(self, df: pd.DataFrame, treat_outliers: bool = True, category_synonym_map: Optional[Dict[str, str]] = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Performs automated cleaning: duplicate removal, missing value imputation,
         outlier treatment, and column standardization.
@@ -66,6 +133,9 @@ class AutomatedDataCleaner:
                     df_cleaned[col] = df_cleaned[col].fillna(fill_val)
                     imputation_strategy_used[col] = "mode"
 
+        # 2b. Category normalization for categorical columns
+        df_cleaned, category_normalization = self._normalize_categories(df_cleaned, category_synonym_map)
+
         # 3. Outlier detection and treatment (winsorization)
         outlier_treatment = {}
         numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
@@ -93,6 +163,7 @@ class AutomatedDataCleaner:
             "imputation_strategy_used": imputation_strategy_used,
             "high_missing_flagged": high_missing_flagged,
             "outlier_treatment": outlier_treatment,
+            "category_normalization": category_normalization,
             "status": "Success"
         }
 
