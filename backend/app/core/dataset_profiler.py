@@ -6,12 +6,91 @@ from typing import Dict, Any, List, Optional
 
 class LocalDatasetProfiler:
     def __init__(self):
-        pass
+        self._pii_name_patterns = [
+            (r'(email|e_mail|mail)', 'email', 0.9),
+            (r'(phone|tel|mobile|cell)', 'phone', 0.9),
+            (r'(ssn|social_security|socialsecurity)', 'ssn', 0.95),
+            (r'(credit_card|creditcard|cc_num|card_number|cc\b|card\b)', 'credit_card', 0.9),
+            (r'(passport|passport_num)', 'passport', 0.85),
+            (r'(driver_license|driverlicense|dl_num)', 'driver_license', 0.85),
+            (r'(address|street|zip|postal)', 'address', 0.7),
+            (r'(name|first_name|last_name|full_name|fname|lname)', 'name', 0.6),
+            (r'(dob|date_of_birth|birth)', 'dob', 0.8),
+            (r'(ip_address|ip\b)', 'ip_address', 0.7),
+        ]
+
+        self._pii_value_patterns = [
+            (re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'), 'email', 0.95),
+            (re.compile(r'^(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$'), 'phone', 0.9),
+            (re.compile(r'^\d{3}-\d{2}-\d{4}$'), 'ssn', 0.95),
+            (re.compile(r'^(\d{4}[- ]?){3}\d{4}$|^\d{13,16}$'), 'credit_card', 0.85),
+            (re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'), 'ip_address', 0.8),
+        ]
+
+    def _detect_pii(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+        pii_flags = []
+        for col in df.columns:
+            col_lower = str(col).lower()
+            max_confidence = 0.0
+            reasons = []
+
+            for pattern, ptype, conf in self._pii_name_patterns:
+                if re.search(pattern, col_lower):
+                    if conf > max_confidence:
+                        max_confidence = conf
+                    reasons.append(f"column name matches {ptype} pattern")
+
+            if pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object:
+                sample_vals = df[col].dropna().astype(str).head(50)
+                for regex, ptype, conf in self._pii_value_patterns:
+                    matches = sample_vals.apply(lambda x: bool(regex.match(x))).sum()
+                    if matches > 0:
+                        match_ratio = matches / len(sample_vals)
+                        val_conf = conf * min(1.0, match_ratio * 2)
+                        if val_conf > max_confidence:
+                            max_confidence = val_conf
+                        reasons.append(f"{matches}/{len(sample_vals)} values match {ptype} format")
+
+            if max_confidence > 0.0:
+                pii_flags.append({
+                    "column": str(col),
+                    "reason": "; ".join(reasons),
+                    "confidence": round(max_confidence, 2)
+                })
+        return pii_flags
+
+    def _mask_value(self, value: str, ptype: str) -> str:
+        if ptype == 'email':
+            parts = value.split('@')
+            if len(parts) == 2:
+                return f"{parts[0][0]}***@***.{parts[1].split('.')[-1]}"
+            return "***@***.***"
+        elif ptype == 'phone':
+            digits = re.sub(r'\D', '', value)
+            if len(digits) >= 4:
+                return f"***-***-{digits[-4:]}"
+            return "***-***-****"
+        elif ptype == 'ssn':
+            return "***-**-" + value[-4:] if len(value) >= 4 else "***-**-****"
+        elif ptype == 'credit_card':
+            return "**** **** **** " + value[-4:] if len(value) >= 4 else "**** **** **** ****"
+        elif ptype == 'ip_address':
+            parts = value.split('.')
+            return f"***.***.***.{parts[-1]}" if len(parts) == 4 else "***.***.***.***"
+        else:
+            return value[0] + "***" if len(value) > 0 else "***"
+
+    def _get_pii_type(self, reasons: str) -> str:
+        for ptype in ['email', 'phone', 'ssn', 'credit_card', 'ip_address', 'passport', 'driver_license', 'address', 'name', 'dob']:
+            if ptype in reasons.lower():
+                return ptype
+        return 'unknown'
 
     def profile_csv(self, file_contents: bytes, filename: str, dataframe: pd.DataFrame | None = None,
                     kpi_keywords: Optional[List[str]] = None,
                     geo_keywords: Optional[List[str]] = None,
-                    cleaning_report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    cleaning_report: Optional[Dict[str, Any]] = None,
+                    mask_pii: bool = False) -> Dict[str, Any]:
         """
         Parses a CSV dataset locally using Pandas/NumPy, extracting a rich,
         compact JSON summary to send to NVIDIA Nemotron without sending raw files.
@@ -96,7 +175,7 @@ class LocalDatasetProfiler:
             else:
                 # fallback pattern detection for geo
                 pattern_match = False
-                if df[col].dtype == object:
+                if (pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object) and df[col].notna().any():
                     # Check first few non-null unique values
                     for val in sample_vals_clean:
                         if re.fullmatch(r'[A-Z]{2}|[A-Z]{3}', val):
@@ -116,6 +195,19 @@ class LocalDatasetProfiler:
                     col_meta["geo_confidence"] = 0.0
 
             columns_info.append(col_meta)
+
+        # PII Detection
+        pii_flags = self._detect_pii(df)
+
+        # Build masked preview if requested
+        masked_preview = {}
+        if mask_pii:
+            for flag in pii_flags:
+                if flag["confidence"] >= 0.7:
+                    col_name = flag["column"]
+                    ptype = self._get_pii_type(flag["reason"])
+                    sample_vals = df[col_name].dropna().astype(str).head(5).tolist()
+                    masked_preview[col_name] = [self._mask_value(v, ptype) for v in sample_vals]
 
         # Build detected_kpis list ordered by confidence descending
         if detected_kpis:
@@ -188,8 +280,11 @@ class LocalDatasetProfiler:
             "primary_kpi": primary_kpi,
             "correlation_matrix": correlation_matrix,
             "extracted_chart_data": extracted_chart_data,
-            "quality_score": round(float((1 - df.isnull().mean().mean()) * 100), 1)
+            "quality_score": round(float((1 - df.isnull().mean().mean()) * 100), 1),
+            "pii_flags": pii_flags,
         }
+        if masked_preview:
+            summary["masked_preview"] = masked_preview
 
         # If a cleaning report is supplied, attach a human‑readable cleaning summary
         # and a detailed quality‑score breakdown.
