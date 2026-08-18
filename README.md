@@ -1,4 +1,4 @@
-# Nexus AI Analytics
+# AutoInsight Analytics
 
 Upload a CSV or Excel dataset, then ask a question in plain language. Nexus cleans and profiles the data locally, computes the chart series locally, and renders an interactive dashboard from those real values.
 
