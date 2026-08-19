@@ -4,7 +4,7 @@ import {
   ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
-import { uploadDataset, streamAIQuery, fetchDatasetPreview } from '../api/client';
+import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset } from '../api/client';
 import './Dashboard.css';
 
 // Chart Chooser Dropdown Component for single cards
@@ -236,6 +236,10 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(null);
 
+  const [preprocessHistory, setPreprocessHistory] = useState([]);
+  const [preprocessInput, setPreprocessInput] = useState('');
+  const [preprocessLoading, setPreprocessLoading] = useState(false);
+
   const handleToggleExpand = (id) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
@@ -423,7 +427,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     setChatInput(promptText);
   };
 
-  const fetchPreview = async (page = 1) => {
+const fetchPreview = async (page = 1) => {
     if (!datasetId) return;
     setPreviewLoading(true);
     setPreviewError(null);
@@ -435,6 +439,30 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const handlePreprocessSubmit = async (e) => {
+    e.preventDefault();
+    const cmd = preprocessInput.trim();
+    if (!cmd) return;
+    setPreprocessInput('');
+    setPreprocessHistory(prev => [...prev, { role: 'user', text: cmd }]);
+    setPreprocessLoading(true);
+    try {
+      const res = await preprocessDataset(datasetId, cmd);
+      // success
+      setPreprocessHistory(prev => [...prev, { role: 'ai', text: res.confirmation_message || 'Preprocessing completed.', type: 'success' }]);
+      // refresh current page to reflect changes
+      await fetchPreview(previewData.page);
+    } catch (err) {
+      setPreprocessHistory(prev => [...prev, { role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' }]);
+    } finally {
+      setPreprocessLoading(false);
+    }
+  };
+
+  const handlePromptClick = (promptText) => {
+    setChatInput(promptText);
   };
 
   const handleViewChange = (view) => {
@@ -539,6 +567,60 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Preprocessing Copilot Chat */}
+        <div className="glass-panel" style={{ borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px' }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)', margin: 0 }}>Preprocessing Copilot</h4>
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', paddingRight: '8px' }}>
+            {preprocessHistory.length === 0 && (
+              <div style={{ color: 'var(--c-text-secondary)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
+                Ask to add columns, fill missing, filter rows, etc.
+              </div>
+            )}
+            {preprocessHistory.map((msg, idx) => (
+              <div key={idx} style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: msg.role === 'user' ? 'var(--c-accent-purple)' : (msg.type === 'error' ? 'rgba(255,165,0,0.15)' : 'var(--c-glass-bg)'),
+                borderLeft: msg.type === 'error' ? '4px solid var(--c-accent-orange)' : 'none',
+                color: msg.role === 'user' ? '#fff' : 'var(--c-text)',
+                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                maxWidth: '85%',
+                fontSize: '0.85rem',
+                lineHeight: 1.4,
+              }}>
+                {msg.text}
+              </div>
+            ))}
+            {preprocessLoading && (
+              <div style={{ padding: '10px 12px', borderRadius: '8px', background: 'var(--c-glass-bg)', alignSelf: 'flex-start', maxWidth: '85%', fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
+                Thinking…
+              </div>
+            )}
+          </div>
+          <form onSubmit={handlePreprocessSubmit} style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              placeholder="e.g., add a profit margin column as profit divided by sales"
+              value={preprocessInput}
+              onChange={(e) => setPreprocessInput(e.target.value)}
+              disabled={preprocessLoading}
+              style={{
+                flex: 1,
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--c-glass-border)',
+                background: 'var(--c-glass-bg)',
+                color: 'var(--c-text)',
+                outline: 'none',
+                fontSize: '0.85rem',
+              }}
+            />
+            <button type="submit" disabled={preprocessLoading || !preprocessInput.trim()} className="btn btn-primary" style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
+              {preprocessLoading ? 'Sending…' : 'Send'}
+            </button>
+          </form>
         </div>
       </div>
     );

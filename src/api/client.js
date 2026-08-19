@@ -82,3 +82,16 @@ export const fetchDatasetPreview = async (datasetId, page = 1, pageSize = 50) =>
   }
   return await response.json();
 };
+
+export const preprocessDataset = async (datasetId, command) => {
+  const response = await fetch(`${BASE_URL}/dataset/${datasetId}/preprocess`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Preprocessing failed' }));
+    throw new Error(err.detail);
+  }
+  return await response.json();
+};
