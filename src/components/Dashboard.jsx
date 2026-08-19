@@ -4,7 +4,7 @@ import {
   ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
-import { uploadDataset, streamAIQuery } from '../api/client';
+import { uploadDataset, streamAIQuery, fetchDatasetPreview } from '../api/client';
 import './Dashboard.css';
 
 // Chart Chooser Dropdown Component for single cards
@@ -231,6 +231,10 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [detailedReport, setDetailedReport] = useState('');
   const [forecast, setForecast] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [activeView, setActiveView] = useState('dashboard');
+  const [previewData, setPreviewData] = useState({ columns: [], rows: [], total_rows: 0, page: 1, page_size: 50, total_pages: 0, cleaning_summary: null });
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
 
   const handleToggleExpand = (id) => {
     setExpandedCard(expandedCard === id ? null : id);
@@ -419,6 +423,127 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     setChatInput(promptText);
   };
 
+  const fetchPreview = async (page = 1) => {
+    if (!datasetId) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const data = await fetchDatasetPreview(datasetId, page, previewData.page_size);
+      setPreviewData(data);
+    } catch (err) {
+      setPreviewError(err.message);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleViewChange = (view) => {
+    setActiveView(view);
+    if (view === 'datasets' && datasetId) {
+      fetchPreview(1);
+    }
+  };
+
+  const DatasetPreviewView = () => {
+    const { columns, rows, total_rows, page, page_size, total_pages, cleaning_summary } = previewData;
+
+    const renderCleaningSummary = () => {
+      if (!cleaning_summary) return null;
+      const { rows_before, rows_after, duplicates_removed, imputation_details, high_missing_flagged, outlier_treatment_details } = cleaning_summary;
+      return (
+        <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '12px', color: 'var(--c-text)' }}>Cleaning Summary</h4>
+          <ul style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', lineHeight: 1.8, paddingLeft: '18px' }}>
+            <li>{rows_before} → {rows_after} rows after cleaning ({duplicates_removed} duplicates removed)</li>
+            {imputation_details && imputation_details.length > 0 && (
+              <li>Imputation: {imputation_details.map(d => `${d.column} (${d.strategy})`).join(', ')}</li>
+            )}
+            {high_missing_flagged && high_missing_flagged.length > 0 && (
+              <li>High missing flagged: {high_missing_flagged.map(c => c.column).join(', ')}</li>
+            )}
+            {outlier_treatment_details && outlier_treatment_details.length > 0 && (
+              <li>Outlier treatment: {outlier_treatment_details.map(d => `${d.column} (${d.method})`).join(', ')}</li>
+            )}
+          </ul>
+        </div>
+      );
+    };
+
+    if (previewLoading) {
+      return (
+        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>
+          Loading…
+        </div>
+      );
+    }
+
+    if (previewError) {
+      return (
+        <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px', color: 'var(--c-accent-orange)' }}>
+          Error: {previewError}
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', overflow: 'auto' }}>
+        {renderCleaningSummary()}
+        <div className="glass-panel" style={{ borderRadius: '12px', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {columns.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ background: 'var(--c-glass-bg)', borderBottom: '1px solid var(--c-glass-border)' }}>
+                    {columns.map(col => (
+                      <th key={col} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--c-text)', whiteSpace: 'nowrap' }}>{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--c-glass-border)', background: i % 2 === 0 ? 'transparent' : 'var(--c-glass-bg)' }}>
+                      {columns.map(col => (
+                        <td key={col} style={{ padding: '10px 12px', color: 'var(--c-text)', whiteSpace: 'nowrap' }}>
+                          {row[col] === null || row[col] === undefined ? <span style={{ color: 'var(--c-text-muted)' }}>-</span> : String(row[col])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={columns.length} style={{ padding: '20px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>No data</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--c-glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
+              Page {page} of {total_pages || 1} — {total_rows} rows total
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                className="btn btn-glass"
+                disabled={page <= 1}
+                onClick={() => fetchPreview(page - 1)}
+              >
+                Previous
+              </button>
+              <button 
+                className="btn btn-glass"
+                disabled={page >= total_pages}
+                onClick={() => fetchPreview(page + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="dashboard-layout">
       {/* Add Chart Modal */}
@@ -436,8 +561,12 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
             <ChevronLeft size={20} />
           </button>
           <div className="divider"></div>
-          <button className="icon-btn active" title="Dashboard"><LayoutDashboard size={20} /></button>
-          <button className="icon-btn" title="Datasets"><Database size={20} /></button>
+          <button className={`icon-btn ${activeView === 'dashboard' ? 'active' : ''}`} title="Dashboard" onClick={() => handleViewChange('dashboard')}>
+            <LayoutDashboard size={20} />
+          </button>
+          <button className={`icon-btn ${activeView === 'datasets' ? 'active' : ''}`} title="Datasets" onClick={() => handleViewChange('datasets')}>
+            <Database size={20} />
+          </button>
           <button className="icon-btn" title="AI Chat"><MessageSquare size={20} /></button>
           <button className="icon-btn" title="Forecasting"><LineChart size={20} /></button>
           <button className="icon-btn" title="Reports"><FileText size={20} /></button>
@@ -451,98 +580,114 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
 
       {/* Main Workspace */}
       <main className="workspace">
-        <header className="workspace-header">
-          <div>
-            <h2>{dashboardTitle}</h2>
-            <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
-              Powered by NVIDIA Nemotron-3 Super 120B & Multi-Agent Engine
+        {activeView === 'dashboard' ? (
+          <>
+            <header className="workspace-header">
+              <div>
+                <h2>{dashboardTitle}</h2>
+                <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
+                  Powered by NVIDIA Nemotron-3 Super 120B & Multi-Agent Engine
+                </div>
+              </div>
+
+              <div className="header-actions">
+                <button className="btn btn-glass" onClick={handleLoadSampleData} style={{ gap: '6px' }} disabled={isUploading}>
+                  <Play size={15} color="var(--c-accent-emerald)" /> Sample CSV
+                </button>
+
+                <label className="btn btn-glass" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload CSV'}
+                  <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} />
+                </label>
+
+                <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>
+                  <Plus size={16} /> Add Chart
+                </button>
+              </div>
+            </header>
+
+            {/* Top KPI Cards Row */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '16px', marginBottom: '20px'
+            }}>
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PRIMARY KPI ({kpiSummary.primary_kpi})</span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {kpiSummary.value}
+                </div>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>TOTAL DATA RECORDS</span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                  {kpiSummary.total_rows}
+                </div>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>DATA INTEGRITY SCORE</span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-emerald)' }}>
+                  {kpiSummary.data_quality}%
+                </div>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PROJECTED 90-DAY GROWTH</span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-purple)' }}>
+                  {forecast?.projected_growth_rate || '—'}
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div className="header-actions">
-            <button className="btn btn-glass" onClick={handleLoadSampleData} style={{ gap: '6px' }} disabled={isUploading}>
-              <Play size={15} color="var(--c-accent-emerald)" /> Sample CSV
-            </button>
-
-            <label className="btn btn-glass" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload CSV'}
-              <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} />
-            </label>
-
-            <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>
-              <Plus size={16} /> Add Chart
-            </button>
-          </div>
-        </header>
-
-        {/* Top KPI Cards Row */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px', marginBottom: '20px'
-        }}>
-          <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PRIMARY KPI ({kpiSummary.primary_kpi})</span>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {kpiSummary.value}
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>TOTAL DATA RECORDS</span>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
-              {kpiSummary.total_rows}
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>DATA INTEGRITY SCORE</span>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-emerald)' }}>
-              {kpiSummary.data_quality}%
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PROJECTED 90-DAY GROWTH</span>
-            <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-purple)' }}>
-              {forecast?.projected_growth_rate || '—'}
-            </div>
-          </div>
-        </div>
-
-        {/* Canvas & Charts */}
-        <div className="canvas">
-          {activeCharts.map((chart) => (
-            <ChartCard 
-              key={chart.id}
-              chart={chart}
-              isExpanded={expandedCard === chart.id} 
-              onToggleExpand={handleToggleExpand} 
-              onRemove={handleRemoveChart}
-              onTypeChange={handleTypeChange}
-            />
-          ))}
-
-          {!activeCharts.length && !isUploading && (
-            <div className="recommendation-card liquid-glass">
-              <div className="rec-header"><Database size={18} color="var(--c-accent-purple)" /><h3>Ready for your data</h3></div>
-              <p style={{ fontSize: '0.9rem' }}>Upload a CSV or Excel dataset. The dashboard will clean it and render real charts from it.</p>
-            </div>
-          )}
-          
-          {/* Recommendation Card */}
-          <div className="recommendation-card liquid-glass">
-            <div className="rec-header">
-              <Sparkles size={18} color="var(--c-accent-purple)" />
-              <h3>AI Recommendations</h3>
-            </div>
-            <ul style={{ paddingLeft: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {recommendations.map((rec, i) => (
-                <li key={i}>{rec}</li>
+            {/* Canvas & Charts */}
+            <div className="canvas">
+              {activeCharts.map((chart) => (
+                <ChartCard 
+                  key={chart.id}
+                  chart={chart}
+                  isExpanded={expandedCard === chart.id} 
+                  onToggleExpand={handleToggleExpand} 
+                  onRemove={handleRemoveChart}
+                  onTypeChange={handleTypeChange}
+                />
               ))}
-            </ul>
-            <button className="btn btn-primary" style={{marginTop: '16px', width: '100%'}} onClick={() => setIsReportOpen(true)}>View detailed report</button>
+
+              {!activeCharts.length && !isUploading && (
+                <div className="recommendation-card liquid-glass">
+                  <div className="rec-header"><Database size={18} color="var(--c-accent-purple)" /><h3>Ready for your data</h3></div>
+                  <p style={{ fontSize: '0.9rem' }}>Upload a CSV or Excel dataset. The dashboard will clean it and render real charts from it.</p>
+                </div>
+              )}
+              
+              {/* Recommendation Card */}
+              <div className="recommendation-card liquid-glass">
+                <div className="rec-header">
+                  <Sparkles size={18} color="var(--c-accent-purple)" />
+                  <h3>AI Recommendations</h3>
+                </div>
+                <ul style={{ paddingLeft: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+                <button className="btn btn-primary" style={{marginTop: '16px', width: '100%'}} onClick={() => setIsReportOpen(true)}>View detailed report</button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div style={{ height: 'calc(100% - 80px)', display: 'flex', flexDirection: 'column' }}>
+            <header className="workspace-header" style={{ flexShrink: 0 }}>
+              <div>
+                <h2>Dataset Preview</h2>
+                <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
+                  Cleaned & preprocessed data view
+                </div>
+              </div>
+            </header>
+            <DatasetPreviewView />
           </div>
-        </div>
+        )}
       </main>
 
       {/* Right AI Copilot */}

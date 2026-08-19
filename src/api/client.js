@@ -73,3 +73,12 @@ export const fetchForecast = async (historicalValues, periods = 4) => {
   });
   return await response.json();
 };
+
+export const fetchDatasetPreview = async (datasetId, page = 1, pageSize = 50) => {
+  const response = await fetch(`${BASE_URL}/dataset/${datasetId}/preview?page=${page}&page_size=${pageSize}`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to fetch dataset preview' }));
+    throw new Error(err.detail);
+  }
+  return await response.json();
+};
