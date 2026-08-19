@@ -236,9 +236,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(null);
 
-  const [preprocessHistory, setPreprocessHistory] = useState([]);
-  const [preprocessInput, setPreprocessInput] = useState('');
-  const [preprocessLoading, setPreprocessLoading] = useState(false);
+  
 
   const handleToggleExpand = (id) => {
     setExpandedCard(expandedCard === id ? null : id);
@@ -333,7 +331,16 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     }]);
   };
 
-  const handleChatSubmit = async (e) => {
+  const preprocessKeywords = [
+  "add a column","add column","drop column","remove column","rename column","fill missing","fill in missing","change type","convert column","filter rows","filter out"
+];
+
+const isPreprocessCommand = (msg) => {
+  const lower = msg.toLowerCase();
+  return preprocessKeywords.some(kw => lower.includes(kw));
+};
+
+const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
     
@@ -346,6 +353,38 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
       return;
     }
 
+    if (isPreprocessCommand(userMsg)) {
+      // Preprocessing path
+      setChatHistory(prev => [...prev, { role: 'ai', text: '⚙️ Processing preprocessing command...' }]);
+      try {
+        const res = await preprocessDataset(datasetId, userMsg);
+        setChatHistory(prev => {
+          const updated = [...prev];
+          if (updated[updated.length - 1]?.role === 'ai') {
+            updated[updated.length - 1] = { role: 'ai', text: res.confirmation_message || 'Preprocessing completed.' };
+          } else {
+            updated.push({ role: 'ai', text: res.confirmation_message || 'Preprocessing completed.' });
+          }
+          return updated;
+        });
+        if (activeView === 'datasets') {
+          await fetchPreview(previewData.page);
+        }
+      } catch (err) {
+        setChatHistory(prev => {
+          const updated = [...prev];
+          if (updated[updated.length - 1]?.role === 'ai') {
+            updated[updated.length - 1] = { role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' };
+          } else {
+            updated.push({ role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' });
+          }
+          return updated;
+        });
+      }
+      return;
+    }
+
+    // Normal query path
     setChatHistory(prev => [...prev, { role: 'ai', text: '🧠 Nemotron-3 Reasoning in progress...' }]);
 
     let lastThinking = '';
@@ -438,26 +477,6 @@ const fetchPreview = async (page = 1) => {
       setPreviewError(err.message);
     } finally {
       setPreviewLoading(false);
-    }
-  };
-
-  const handlePreprocessSubmit = async (e) => {
-    e.preventDefault();
-    const cmd = preprocessInput.trim();
-    if (!cmd) return;
-    setPreprocessInput('');
-    setPreprocessHistory(prev => [...prev, { role: 'user', text: cmd }]);
-    setPreprocessLoading(true);
-    try {
-      const res = await preprocessDataset(datasetId, cmd);
-      // success
-      setPreprocessHistory(prev => [...prev, { role: 'ai', text: res.confirmation_message || 'Preprocessing completed.', type: 'success' }]);
-      // refresh current page to reflect changes
-      await fetchPreview(previewData.page);
-    } catch (err) {
-      setPreprocessHistory(prev => [...prev, { role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' }]);
-    } finally {
-      setPreprocessLoading(false);
     }
   };
 
@@ -640,65 +659,7 @@ const fetchPreview = async (page = 1) => {
           </div>
         </div>
 
-        {/* Data Editor Chat */}
-        <div className="glass-panel" style={{ borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', borderTop: '3px solid var(--c-accent-teal)' }}>
-          <div>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)', margin: 0 }}>Data Editor</h4>
-            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--c-text-secondary)' }}>
-              Modify columns and values directly — for chart/query questions use the AI Chat panel.
-            </p>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', paddingRight: '8px' }}>
-            {preprocessHistory.length === 0 && (
-              <div style={{ color: 'var(--c-text-secondary)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
-                Ask to add columns, fill missing, filter rows, etc.
-              </div>
-            )}
-            {preprocessHistory.map((msg, idx) => (
-              <div key={idx} style={{
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: msg.role === 'user' ? 'var(--c-accent-teal)' : (msg.type === 'error' ? 'rgba(255,165,0,0.15)' : 'var(--c-glass-bg)'),
-                borderLeft: msg.type === 'error' ? '4px solid var(--c-accent-orange)' : 'none',
-                color: msg.role === 'user' ? '#fff' : 'var(--c-text)',
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '85%',
-                fontSize: '0.85rem',
-                lineHeight: 1.4,
-              }}>
-                {msg.text}
-              </div>
-            ))}
-            {preprocessLoading && (
-              <div style={{ padding: '10px 12px', borderRadius: '8px', background: 'var(--c-glass-bg)', alignSelf: 'flex-start', maxWidth: '85%', fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
-                Thinking…
-              </div>
-            )}
-          </div>
-          <form onSubmit={handlePreprocessSubmit} style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type="text"
-              placeholder="e.g., add a profit margin column as profit divided by sales"
-              value={preprocessInput}
-              onChange={(e) => setPreprocessInput(e.target.value)}
-              disabled={preprocessLoading}
-              style={{
-                flex: 1,
-                padding: '10px 12px',
-                borderRadius: '8px',
-                border: '1px solid var(--c-glass-border)',
-                background: 'var(--c-glass-bg)',
-                color: 'var(--c-text)',
-                outline: 'none',
-                fontSize: '0.85rem',
-              }}
-            />
-            <button type="submit" disabled={preprocessLoading || !preprocessInput.trim()} className="btn btn-primary" style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>
-              {preprocessLoading ? 'Sending…' : 'Send'}
-            </button>
-          </form>
         </div>
-      </div>
     );
   };
 
@@ -862,7 +823,7 @@ const fetchPreview = async (page = 1) => {
         
         <div className="chat-history">
           {chatHistory.map((msg, idx) => (
-            <div key={idx} className={`chat-bubble ${msg.role}`}>
+            <div key={idx} className={`chat-bubble ${msg.role}`} style={msg.type === 'error' ? { borderLeft: '4px solid var(--c-accent-orange)', background: 'rgba(255,165,0,0.15)' } : {}}>
               {msg.text}
             </div>
           ))}
