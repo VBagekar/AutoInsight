@@ -470,25 +470,100 @@ const fetchPreview = async (page = 1) => {
 
   const DatasetPreviewView = () => {
     const { columns, rows, total_rows, page, page_size, total_pages, cleaning_summary } = previewData;
+    const [cleaningExpanded, setCleaningExpanded] = useState(false);
+    const [showAllImputation, setShowAllImputation] = useState(false);
+    const [showAllHighMissing, setShowAllHighMissing] = useState(false);
+    const [showAllOutliers, setShowAllOutliers] = useState(false);
+
+    const renderChips = (items, showAll, setShowAll, label) => {
+      if (!items || items.length === 0) return null;
+      const display = showAll ? items : items.slice(0, 5);
+      const hiddenCount = items.length - display.length;
+      return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+          {display.map((item, i) => (
+            <span key={i} style={{
+              padding: '4px 10px',
+              borderRadius: '999px',
+              background: 'var(--c-glass-bg)',
+              border: '1px solid var(--c-glass-border)',
+              fontSize: '0.78rem',
+              color: 'var(--c-text)',
+              whiteSpace: 'nowrap'
+            }}>
+              {item}
+            </span>
+          ))}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(!showAll)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: '999px',
+                background: 'transparent',
+                border: '1px dashed var(--c-glass-border)',
+                fontSize: '0.78rem',
+                color: 'var(--c-text-secondary)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Show {hiddenCount} more
+            </button>
+          )}
+        </div>
+      );
+    };
 
     const renderCleaningSummary = () => {
       if (!cleaning_summary) return null;
       const { rows_before, rows_after, duplicates_removed, imputation_details, high_missing_flagged, outlier_treatment_details } = cleaning_summary;
+      const adjustedCols = new Set([
+        ...(imputation_details || []).map(s => s.split(':')[0].trim()),
+        ...(high_missing_flagged || []).map(s => s.split(':')[0].trim()),
+        ...(outlier_treatment_details || []).map(s => s.split(':')[0].trim())
+      ]).size;
+
+      const summaryLine = `${rows_after} rows after cleaning · ${adjustedCols} column${adjustedCols !== 1 ? 's' : ''} adjusted — click to ${cleaningExpanded ? 'collapse' : 'expand'}`;
+
       return (
-        <div className="glass-panel" style={{ padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '12px', color: 'var(--c-text)' }}>Cleaning Summary</h4>
-          <ul style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', lineHeight: 1.8, paddingLeft: '18px' }}>
-            <li>{rows_before} → {rows_after} rows after cleaning ({duplicates_removed} duplicates removed)</li>
-            {imputation_details && imputation_details.length > 0 && (
-              <li>Imputation: {imputation_details.join(', ')}</li>
-            )}
-            {high_missing_flagged && high_missing_flagged.length > 0 && (
-              <li>High missing flagged: {high_missing_flagged.join(', ')}</li>
-            )}
-            {outlier_treatment_details && outlier_treatment_details.length > 0 && (
-              <li>Outlier treatment: {outlier_treatment_details.join(', ')}</li>
-            )}
-          </ul>
+        <div className="glass-panel" style={{ borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' }}>
+          <button
+            type="button"
+            onClick={() => setCleaningExpanded(!cleaningExpanded)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--c-text)',
+              fontSize: '0.85rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              textAlign: 'left'
+            }}
+          >
+            <span>{summaryLine}</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--c-text-secondary)' }}>
+              {cleaningExpanded ? '▲' : '▼'}
+            </span>
+          </button>
+{cleaningExpanded ? (
+            <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--c-glass-border)' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--c-text)', marginBottom: '4px' }}>
+                  {rows_before} → {rows_after} rows ({duplicates_removed} duplicates removed)
+                </div>
+                {renderChips(imputation_details, showAllImputation, setShowAllImputation, 'Imputation')}
+                {renderChips(high_missing_flagged, showAllHighMissing, setShowAllHighMissing, 'High missing')}
+                {renderChips(outlier_treatment_details, showAllOutliers, setShowAllOutliers, 'Outliers')}
+              </div>
+            </div>
+          ) : null}
         </div>
       );
     };
@@ -510,13 +585,13 @@ const fetchPreview = async (page = 1) => {
     }
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', overflow: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'auto' }}>
         {renderCleaningSummary()}
         <div className="glass-panel" style={{ borderRadius: '12px', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
           {columns.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{ overflowX: 'auto', flex: 1 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr style={{ background: 'var(--c-glass-bg)', borderBottom: '1px solid var(--c-glass-border)' }}>
                     {columns.map(col => (
                       <th key={col} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--c-text)', whiteSpace: 'nowrap' }}>{col}</th>
@@ -565,9 +640,14 @@ const fetchPreview = async (page = 1) => {
           </div>
         </div>
 
-        {/* Preprocessing Copilot Chat */}
-        <div className="glass-panel" style={{ borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px' }}>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)', margin: 0 }}>Preprocessing Copilot</h4>
+        {/* Data Editor Chat */}
+        <div className="glass-panel" style={{ borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', borderTop: '3px solid var(--c-accent-teal)' }}>
+          <div>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--c-text)', margin: 0 }}>Data Editor</h4>
+            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: 'var(--c-text-secondary)' }}>
+              Modify columns and values directly — for chart/query questions use the AI Chat panel.
+            </p>
+          </div>
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '200px', paddingRight: '8px' }}>
             {preprocessHistory.length === 0 && (
               <div style={{ color: 'var(--c-text-secondary)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
@@ -578,7 +658,7 @@ const fetchPreview = async (page = 1) => {
               <div key={idx} style={{
                 padding: '10px 12px',
                 borderRadius: '8px',
-                background: msg.role === 'user' ? 'var(--c-accent-purple)' : (msg.type === 'error' ? 'rgba(255,165,0,0.15)' : 'var(--c-glass-bg)'),
+                background: msg.role === 'user' ? 'var(--c-accent-teal)' : (msg.type === 'error' ? 'rgba(255,165,0,0.15)' : 'var(--c-glass-bg)'),
                 borderLeft: msg.type === 'error' ? '4px solid var(--c-accent-orange)' : 'none',
                 color: msg.role === 'user' ? '#fff' : 'var(--c-text)',
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
