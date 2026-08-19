@@ -218,6 +218,65 @@ Generate the optimal interactive dashboard layout specification JSON based on th
             "detailed_report": raw_text or f"# Executive Intelligence & Data Analysis Report\n\n## Overview\nAnalysis performed on dataset **{dataset_summary.get('filename', 'Uploaded Data')}** consisting of **{dataset_summary.get('row_count', 'N/A')}** rows and **{dataset_summary.get('column_count', 'N/A')}** attributes.\n\n## Key Findings\n- **Primary Metric ({primary})**: Showing consistent upward trajectory.\n- **Data Integrity Score**: {dataset_summary.get('quality_score', 98.4)}% clean records.\n- **Risk Factor**: Slight variance observed in secondary categories."
         }
 
+    def generate_preprocessing_action(self, user_command: str, columns: List[str], column_types: Dict[str, str]) -> Dict[str, Any]:
+        """Ask Nemotron to translate a natural-language command into a single preprocessing action.
+
+        The model only selects from the allowed action types and must reference only real column names.
+        """
+        if not self.client or not self.api_key:
+            raise ValueError("LLM client not configured; cannot generate preprocessing action.")
+
+        # Build a concise schema description for the prompt
+        cols_desc = ", ".join([f"{c} ({column_types.get(c, 'unknown')})" for c in columns])
+        action_schema = (
+            "Allowed actions (choose exactly one):\n"
+            "1. drop_column: params {\"column\": \"<existing column>\"}\n"
+            "2. rename_column: params {\"column\": \"<existing column>\", \"new_name\": \"<new name>\"}\n"
+            "3. fill_missing: params {\"column\": \"<existing column>\", \"strategy\": \"mean|median|mode|constant|zero|forward_fill\", \"value\": <optional, required only for constant>}\n"
+            "4. change_type: params {\"column\": \"<existing column>\", \"target_type\": \"int|float|string|datetime\"}\n"
+            "5. add_column: params {\"new_column\": \"<new column name>\", \"expression\": \"<safe arithmetic expression using existing numeric columns, e.g., revenue - cost or 2 * revenue>\"}\n"
+            "6. filter_rows: params {\"column\": \"<existing column>\", \"operator\": \"==|!=|>|<|>=|<=\", \"value\": <value>}\n"
+        )
+
+        prompt = (
+            "You are a data preprocessing planner. Convert the user's command into ONE allowed action.\n"
+            "Use ONLY column names from the provided schema. Return JSON only with fields: type, params, explanation.\n\n"
+            f"Columns: {cols_desc}\n\n"
+            f"{action_schema}\n"
+            f"User command: {user_command}"
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                top_p=0.9,
+                max_tokens=800,
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}, "reasoning_budget": 1024},
+            )
+            content = response.choices[0].message.content or ""
+            content = content.strip()
+            if "```" in content:
+                content = content.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(content)
+
+            # Basic validation
+            if not isinstance(parsed, dict):
+                raise ValueError("LLM did not return a JSON object.")
+            action_type = parsed.get("type")
+            allowed_types = {"drop_column", "rename_column", "fill_missing", "change_type", "add_column", "filter_rows"}
+            if action_type not in allowed_types:
+                raise ValueError(f"LLM returned invalid action type: {action_type}")
+            if "params" not in parsed or not isinstance(parsed["params"], dict):
+                raise ValueError("LLM response missing params object.")
+            if "explanation" not in parsed or not isinstance(parsed["explanation"], str):
+                raise ValueError("LLM response missing explanation string.")
+            return parsed
+        except Exception as e:
+            # Re-raise as clear error for caller
+            raise ValueError(f"Failed to parse preprocessing action from LLM: {e}")
+
     def _fallback_response(self, dataset_summary: Dict[str, Any], user_query: str) -> Generator[Dict[str, Any], None, None]:
         dataset_summary = dataset_summary or {}
         thinking_text = (

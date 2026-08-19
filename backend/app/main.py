@@ -15,7 +15,7 @@ if str(backend_dir) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import upload, query, forecast
+from app.api import upload, query, forecast, preprocess
 
 app = FastAPI(
     title="AutoInsights AI Analytics Platform Engine",
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(upload.router, prefix="/api", tags=["Upload & Profiling"])
 app.include_router(query.router, prefix="/api", tags=["AI Query & Reasoning"])
 app.include_router(forecast.router, prefix="/api", tags=["Forecasting"])
+app.include_router(preprocess.router, prefix="/api", tags=["Preprocessing"])
 
 @app.get("/")
 def read_root():
