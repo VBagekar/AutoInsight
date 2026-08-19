@@ -480,13 +480,13 @@ const fetchPreview = async (page = 1) => {
           <ul style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', lineHeight: 1.8, paddingLeft: '18px' }}>
             <li>{rows_before} → {rows_after} rows after cleaning ({duplicates_removed} duplicates removed)</li>
             {imputation_details && imputation_details.length > 0 && (
-              <li>Imputation: {imputation_details.map(d => `${d.column} (${d.strategy})`).join(', ')}</li>
+              <li>Imputation: {imputation_details.join(', ')}</li>
             )}
             {high_missing_flagged && high_missing_flagged.length > 0 && (
-              <li>High missing flagged: {high_missing_flagged.map(c => c.column).join(', ')}</li>
+              <li>High missing flagged: {high_missing_flagged.join(', ')}</li>
             )}
             {outlier_treatment_details && outlier_treatment_details.length > 0 && (
-              <li>Outlier treatment: {outlier_treatment_details.map(d => `${d.column} (${d.method})`).join(', ')}</li>
+              <li>Outlier treatment: {outlier_treatment_details.join(', ')}</li>
             )}
           </ul>
         </div>
