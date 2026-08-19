@@ -190,5 +190,34 @@ class MasterOrchestrator:
             "All displayed values are computed locally from the cleaned uploaded dataset."
         )
 
+    def get_dataset_preview(self, dataset_id: str, page: int = 1, page_size: int = 50) -> Dict[str, Any]:
+        dataset = self.datasets.get(dataset_id)
+        if not dataset:
+            raise KeyError("Dataset not found")
+        
+        df = dataset["df"]
+        total_rows = len(df)
+        page_size = min(page_size, 500)
+        page = max(page, 1)
+        total_pages = (total_rows + page_size - 1) // page_size
+        page = min(page, total_pages) if total_pages > 0 else 1
+        
+        start_idx = (page - 1) * page_size
+        end_idx = min(start_idx + page_size, total_rows)
+        
+        page_df = df.iloc[start_idx:end_idx]
+        
+        rows = page_df.replace({pd.NA: None, pd.NaT: None, float('nan'): None}).where(pd.notnull(page_df), None).to_dict(orient="records")
+        
+        return {
+            "columns": list(df.columns),
+            "rows": rows,
+            "total_rows": total_rows,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "cleaning_summary": dataset["summary"].get("cleaning_summary")
+        }
+
 
 master_orchestrator = MasterOrchestrator()

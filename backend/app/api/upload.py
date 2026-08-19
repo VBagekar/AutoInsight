@@ -18,3 +18,16 @@ async def upload_dataset(file: UploadFile = File(...), sheet_name: str | None = 
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing dataset: {str(e)}")
+
+@router.get("/dataset/{dataset_id}/preview")
+async def preview_dataset(dataset_id: str, page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=1, le=500)):
+    """
+    Returns a paginated preview of the cleaned dataset.
+    """
+    try:
+        result = master_orchestrator.get_dataset_preview(dataset_id, page, page_size)
+        return result
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving dataset preview: {str(e)}")
