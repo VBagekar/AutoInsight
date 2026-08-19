@@ -461,10 +461,6 @@ const fetchPreview = async (page = 1) => {
     }
   };
 
-  const handlePromptClick = (promptText) => {
-    setChatInput(promptText);
-  };
-
   const handleViewChange = (view) => {
     setActiveView(view);
     if (view === 'datasets' && datasetId) {
