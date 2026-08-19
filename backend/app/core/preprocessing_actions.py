@@ -15,23 +15,39 @@ import pandas as pd
 class PreprocessingExecutor:
     """Execute predefined preprocessing actions on a DataFrame safely."""
 
-    # Whitelist for arithmetic expressions: column names, numbers, whitespace, + - * / ( )
-    _EXPR_WHITELIST = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*\s*([-+*/]\s*[A-Za-z_][A-Za-z0-9_]*|\s*[-+*/]\s*\d+(\.\d+)?)*$')
+    _TOKEN_PATTERN = re.compile(r'\d+(?:\.\d+)?|[A-Za-z_][A-Za-z0-9_]*|[-+*/()]')
 
     @staticmethod
     def _validate_expression(expr: str, df: pd.DataFrame) -> None:
         """Validate expression contains only allowed tokens and references existing numeric columns."""
-        # Quick whitelist check
-        if not PreprocessingExecutor._EXPR_WHITELIST.match(expr.replace(' ', '')):
+        tokens = PreprocessingExecutor._TOKEN_PATTERN.findall(expr)
+        if not tokens:
+            raise ValueError("Expression is empty or contains no valid tokens.")
+        remaining = PreprocessingExecutor._TOKEN_PATTERN.sub('', expr)
+        if remaining.strip():
             raise ValueError("Expression contains disallowed characters or patterns.")
-        # Ensure all identifiers exist in df and are numeric
-        # Extract identifiers (column names) from expression
-        tokens = re.findall(r'[A-Za-z_][A-Za-z0-9_]*', expr)
+        paren_depth = 0
         for tok in tokens:
-            if tok not in df.columns:
-                raise ValueError(f"Column '{tok}' referenced in expression does not exist.")
-            if not pd.api.types.is_numeric_dtype(df[tok]):
-                raise ValueError(f"Column '{tok}' is not numeric; cannot use in arithmetic expression.")
+            if tok == '(':
+                paren_depth += 1
+            elif tok == ')':
+                paren_depth -= 1
+                if paren_depth < 0:
+                    raise ValueError("Unbalanced parentheses in expression.")
+        if paren_depth != 0:
+            raise ValueError("Unbalanced parentheses in expression.")
+        # Reject ** (power) and // (floor division) by checking for consecutive * or / tokens
+        for i in range(len(tokens) - 1):
+            if tokens[i] == '*' and tokens[i + 1] == '*':
+                raise ValueError("Power operator ** is not allowed.")
+            if tokens[i] == '/' and tokens[i + 1] == '/':
+                raise ValueError("Floor division operator // is not allowed.")
+        for tok in tokens:
+            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', tok):
+                if tok not in df.columns:
+                    raise ValueError(f"Column '{tok}' referenced in expression does not exist.")
+                if not pd.api.types.is_numeric_dtype(df[tok]):
+                    raise ValueError(f"Column '{tok}' is not numeric; cannot use in arithmetic expression.")
 
     @classmethod
     def drop_column(cls, df: pd.DataFrame, column: str) -> Tuple[pd.DataFrame, str]:
