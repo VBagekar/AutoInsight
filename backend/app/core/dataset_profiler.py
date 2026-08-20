@@ -113,15 +113,20 @@ class LocalDatasetProfiler:
         kpi_kw = [kw.lower() for kw in (kpi_keywords or default_kpi_keywords)]
         geo_kw = [kw.lower() for kw in (geo_keywords or default_geo_keywords)]
 
-        # Pre-detect date columns (used for KPI statistical signal)
+        # Pre-detect date columns (fast sampled check)
         for col in df.columns:
-            col_lower = str(col).lower()
-            parsed_dates = None
-            if not pd.api.types.is_numeric_dtype(df[col]) and df[col].notna().any():
-                parsed_dates = pd.to_datetime(df[col], errors='coerce')
-            date_like = parsed_dates is not None and float(parsed_dates.notna().mean()) >= 0.8
-            if 'date' in col_lower or 'time' in col_lower or 'year' in col_lower or 'month' in col_lower or date_like:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
                 date_cols.append(str(col))
+            elif not pd.api.types.is_numeric_dtype(df[col]) and df[col].notna().any():
+                col_lower = str(col).lower()
+                is_date_name = any(kw in col_lower for kw in ["date", "time", "year", "month", "day", "timestamp", "period"])
+                sample = df[col].dropna().head(20)
+                try:
+                    parsed_dates = pd.to_datetime(sample, errors='coerce', format='mixed')
+                    if parsed_dates.notna().mean() >= 0.8 or (is_date_name and parsed_dates.notna().mean() >= 0.5):
+                        date_cols.append(str(col))
+                except Exception:
+                    pass
 
         for col in df.columns:
             col_lower = str(col).lower()
@@ -152,22 +157,33 @@ class LocalDatasetProfiler:
                 col_meta["median"] = float(df[col].median()) if not df[col].isnull().all() else 0.0
 
                 # KPI confidence scoring
+                is_id_like = bool(re.search(r'(^|_)(id|key|code|zip|postal|row|index|num|number)($|_)', col_lower))
+                is_discrete_date = bool(re.search(r'(^|_)(year|yr|month|day|quarter|qtr|week|hour|minute)($|_)', col_lower))
+
                 keyword_match = any(kw in col_lower for kw in kpi_kw)
-                # statistical signal: not ID-like (unique ratio not ~1) and not a date column
                 unique_ratio = unique_count / row_count if row_count else 1.0
                 statistical_signal = (unique_ratio < 0.95) and (str(col) not in date_cols)
 
-                if keyword_match and statistical_signal:
+                if is_id_like:
+                    kpi_conf = 0.0
+                    col_meta["semantic_role"] = "identifier"
+                elif is_discrete_date:
+                    kpi_conf = 0.0
+                    col_meta["semantic_role"] = "temporal_discrete"
+                elif keyword_match and statistical_signal:
                     kpi_conf = 1.0
+                    col_meta["semantic_role"] = "kpi"
                 elif keyword_match:
-                    kpi_conf = 0.6
-                elif statistical_signal:
+                    kpi_conf = 0.8
+                    col_meta["semantic_role"] = "kpi"
+                elif statistical_signal and unique_count > 5:
                     kpi_conf = 0.4
+                    col_meta["semantic_role"] = "measure"
                 else:
                     kpi_conf = 0.0
+                    col_meta["semantic_role"] = "measure"
 
                 col_meta["kpi_confidence"] = round(kpi_conf, 2)
-                col_meta["semantic_role"] = "kpi" if kpi_conf > 0.0 else "measure"
                 if kpi_conf > 0.0:
                     detected_kpis.append((str(col), kpi_conf))
             # Categorical / geo analysis
@@ -179,12 +195,10 @@ class LocalDatasetProfiler:
                 # fallback pattern detection for geo
                 pattern_match = False
                 if (pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object) and df[col].notna().any():
-                    # Check first few non-null unique values
                     for val in sample_vals_clean:
                         if re.fullmatch(r'[A-Z]{2}|[A-Z]{3}', val):
                             pattern_match = True
                             break
-                        # simple country name list (lowercase)
                         if val.lower() in {"united states", "usa", "canada", "mexico", "uk", "germany", "france", "india", "china", "japan", "australia", "brazil"}:
                             pattern_match = True
                             break
@@ -217,8 +231,8 @@ class LocalDatasetProfiler:
             detected_kpis.sort(key=lambda x: x[1], reverse=True)
             detected_kpis = [col for col, _ in detected_kpis]
         else:
-            # fallback to first few numeric columns
-            detected_kpis = numeric_cols[:4]
+            # fallback to non-id numeric columns
+            detected_kpis = [c for c in numeric_cols if not re.search(r'(^|_)(id|key|code|zip|postal|row)($|_)', c.lower())] or numeric_cols[:4]
 
         # Correlation Matrix for Numeric Columns
         correlation_matrix = {}
@@ -271,13 +285,14 @@ class LocalDatasetProfiler:
                 pass
 
         # High-level Summary object
-        # Use total_rows if provided (for sampled profiling), otherwise use actual dataframe row count
+        col_meta_dict = {c["name"]: c for c in columns_info}
         effective_row_count = total_rows if total_rows > 0 else row_count
         summary = {
             "filename": filename,
             "row_count": effective_row_count,
             "column_count": col_count,
             "columns": columns_info,
+            "col_meta": col_meta_dict,
             "numeric_columns": numeric_cols,
             "date_columns": date_cols,
             "categorical_columns": categorical_cols,
@@ -288,6 +303,17 @@ class LocalDatasetProfiler:
             "quality_score": round(float((1 - df.isnull().mean().mean()) * 100), 1),
             "pii_flags": pii_flags,
         }
+
+        # Sample records for LLM semantic domain understanding
+        try:
+            sample_df = df.head(5).copy()
+            for col in sample_df.columns:
+                if pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+                    sample_df[col] = sample_df[col].astype(str)
+            summary["sample_records"] = sample_df.replace({np.nan: None}).to_dict(orient="records")
+        except Exception:
+            summary["sample_records"] = []
+
         if was_sampled:
             summary["was_sampled"] = True
             summary["sample_size"] = sample_size

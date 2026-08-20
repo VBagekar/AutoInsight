@@ -865,7 +865,8 @@ class TestTask4_GenerateChartPlanWithoutLLM:
 
     def test_returns_empty_without_api_key(self):
         client = NemotronLLMClient()
-        # By default, if NVIDIA_API_KEY is empty, client.client is None
+        client.client = None
+        client.api_key = ""
         result = client.generate_chart_plan(FULL_SUMMARY, "show sales")
         assert result == []
 

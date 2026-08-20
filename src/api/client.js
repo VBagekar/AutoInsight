@@ -1,4 +1,5 @@
-const BASE_URL = 'http://localhost:8000/api';
+// Task 6: configurable via VITE_API_BASE_URL in a root .env file for production deployments.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 export const uploadDataset = async (file) => {
   const formData = new FormData();
@@ -123,3 +124,13 @@ export const downloadDataset = async (datasetId, fallbackName = 'cleaned_dataset
   window.URL.revokeObjectURL(url);
 };
 
+// Task 1: health check — called once on Dashboard mount for the AI Engine status badge.
+export const fetchHealth = async () => {
+  try {
+    const response = await fetch(`${BASE_URL}/health`);
+    if (!response.ok) return { llm_configured: false, llm_reachable: false, model: '' };
+    return await response.json();
+  } catch {
+    return { llm_configured: false, llm_reachable: false, model: '' };
+  }
+};

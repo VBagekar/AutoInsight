@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   LayoutDashboard, Database, MessageSquare, LineChart, FileText, Settings, 
-  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play, Download
+  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play, Download, Copy, Check, BarChart2,
+  Clock, Activity, Cpu, Zap, Loader2
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
-import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset, downloadDataset } from '../api/client';
+import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset, downloadDataset, fetchHealth } from '../api/client';
 import './Dashboard.css';
 
 // Chart Chooser Dropdown Component for single cards
@@ -72,7 +73,14 @@ const ChartCard = ({ chart, isExpanded, onToggleExpand, onRemove, onTypeChange }
       </div>
       
       <div className="chart-container">
-        <ChartRenderer type={chart.type} data={chart.data} xAxis={chart.x_axis} yAxis={chart.y_axis} />
+        <ChartRenderer 
+          type={chart.type} 
+          data={chart.data} 
+          xAxis={chart.x_axis} 
+          yAxis={chart.y_axis} 
+          secondaryDimension={chart.secondary_dimension}
+          matrixData={chart.matrix_data}
+        />
       </div>
       
       {chart.insight_tooltip && (
@@ -84,11 +92,14 @@ const ChartCard = ({ chart, isExpanded, onToggleExpand, onRemove, onTypeChange }
 
       {isExpanded && (
         <div className="expanded-insights animate-fade-in-up">
-          <h4>AI Deep Analysis for {chart.type}</h4>
-          <p>This {chart.type.toLowerCase()} visualization highlights key operational metrics and statistical variances in your dataset. High concentration patterns indicate opportunities for resource reallocation.</p>
+          <h4>Analytical Deep Dive ({chart.type})</h4>
+          <p>
+            This visualization analyzes <strong>{chart.y_axis || 'Metric'}</strong> aggregated across <strong>{chart.x_axis || 'Dimension'}</strong>.
+            Hover over visual elements to inspect interactive PowerBI data cards, percentage contributions, and statistical distributions.
+          </p>
           <div className="insight-tags">
-            <span className="tag success"><TrendingUp size={12}/> Positive Trend</span>
-            <span className="tag warning"><AlertCircle size={12}/> Anomaly Detected</span>
+            <span className="tag success"><TrendingUp size={12}/> Verified Computation</span>
+            <span className="tag warning"><AlertCircle size={12}/> Cleaned & Validated</span>
           </div>
         </div>
       )}
@@ -140,7 +151,7 @@ const AddChartModal = ({ isOpen, onClose, onAddChart }) => {
             <Search size={16} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--c-text-secondary)' }} />
             <input 
               type="text"
-              placeholder="Search 60+ visualization types..."
+              placeholder="Search visualization catalog..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{
@@ -155,7 +166,7 @@ const AddChartModal = ({ isOpen, onClose, onAddChart }) => {
         <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '12px', marginBottom: '12px' }}>
           {categories.map(cat => (
             <button 
-              key={cat}
+              key={cat} 
               className={`btn ${activeCategory === cat ? 'btn-primary' : 'btn-glass'}`}
               style={{ padding: '6px 14px', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
               onClick={() => setActiveCategory(cat)}
@@ -168,7 +179,7 @@ const AddChartModal = ({ isOpen, onClose, onAddChart }) => {
         {/* Chart List Grid */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '10px', paddingRight: '4px' }}>
           {getFilteredCharts().map(type => (
-            <button
+            <button 
               key={type}
               className="glass-panel"
               style={{
@@ -182,7 +193,7 @@ const AddChartModal = ({ isOpen, onClose, onAddChart }) => {
               }}
             >
               <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--c-text)' }}>{type}</span>
-              <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)' }}>Click to add</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)' }}>Click to materialize</span>
             </button>
           ))}
         </div>
@@ -191,29 +202,82 @@ const AddChartModal = ({ isOpen, onClose, onAddChart }) => {
   );
 };
 
-const ReportModal = ({ isOpen, onClose, report }) => {
+// Executive Report Modal Component with Markdown & Export
+const ReportModal = ({ isOpen, onClose, report, datasetName }) => {
+  const [copied, setCopied] = useState(false);
   if (!isOpen) return null;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(report || '');
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([report || ''], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${datasetName || 'executive'}_insights_report.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="modal-backdrop glass-panel" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <section className="glass-panel" style={{ width: 'min(760px, 100%)', maxHeight: '80vh', overflow: 'auto', borderRadius: '24px', padding: '24px', background: 'var(--c-bg)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '1.2rem' }}>Detailed analysis report</h3>
-          <button className="icon-btn small" onClick={onClose}><X size={18} /></button>
+    <div className="modal-backdrop glass-panel" style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+    }}>
+      <section className="glass-panel animate-fade-in-up" style={{
+        width: 'min(820px, 100%)', maxHeight: '85vh', overflow: 'hidden',
+        borderRadius: '24px', padding: '28px', background: 'var(--c-bg)',
+        border: '1px solid var(--c-glass-border)', display: 'flex', flexDirection: 'column'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--c-glass-border)', paddingBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <FileText size={20} color="var(--c-accent-blue)" />
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Executive Analysis Report</h3>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button className="btn btn-glass" onClick={handleCopy} style={{ padding: '6px 12px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {copied ? <Check size={14} color="var(--c-accent-emerald)" /> : <Copy size={14} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <button className="btn btn-glass" onClick={handleDownload} style={{ padding: '6px 12px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Download size={14} /> Download MD
+            </button>
+            <button className="icon-btn small" onClick={onClose}><X size={18} /></button>
+          </div>
         </div>
-        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.65, color: 'var(--c-text-secondary)' }}>{report || 'Ask a question after uploading data to generate a report.'}</div>
+
+        <div style={{
+          flex: 1, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.7,
+          color: 'var(--c-text)', fontSize: '0.92rem', paddingRight: '8px',
+          fontFamily: 'system-ui, -apple-system, sans-serif'
+        }}>
+          {report || 'Upload a dataset and ask analytical questions to generate an executive report.'}
+        </div>
       </section>
     </div>
   );
 };
 
+// Main Dashboard Component
 const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [expandedCard, setExpandedCard] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([
-    { role: 'ai', text: 'Hello! I am your AutoInsights AI Data Scientist powered by Nemotron-3. Upload a CSV or ask questions to dynamically customize your dashboard.' }
+    { 
+      role: 'ai', 
+      text: 'Welcome to AutoInsight! I am your AI Data Scientist powered by NVIDIA Nemotron-3 Ultra 550B. Upload any CSV/Excel file or ask any question to generate interactive dashboards, automated EDA, and executive insights.' 
+    }
   ]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [activeReasoningText, setActiveReasoningText] = useState('');
 
   const [dashboardTitle, setDashboardTitle] = useState('Upload a dataset to begin');
   const [activeCharts, setActiveCharts] = useState([]);
@@ -223,7 +287,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   });
 
   const [recommendations, setRecommendations] = useState([
-    'Upload a CSV or Excel file to receive data-backed recommendations.'
+    'Upload a CSV or Excel file to receive automated cleaning and data-backed visual recommendations.'
   ]);
 
   const [datasetSummary, setDatasetSummary] = useState(null);
@@ -237,8 +301,27 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [previewError, setPreviewError] = useState(null);
   const [currentFileName, setCurrentFileName] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [planSource, setPlanSource] = useState(null);
+  const [cleaningExpanded, setCleaningExpanded] = useState(false);
 
-  
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    let interval = null;
+    if (isThinking || isUploading || isDownloading) {
+      setElapsedTime(0);
+      interval = setInterval(() => {
+        setElapsedTime(prev => +(prev + 0.1).toFixed(1));
+      }, 100);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [isThinking, isUploading, isDownloading]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, activeReasoningText]);
 
   const handleToggleExpand = (id) => {
     setExpandedCard(expandedCard === id ? null : id);
@@ -254,16 +337,18 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
 
   const handleAddChart = (chartType) => {
     const newId = `custom-${Date.now()}`;
+    const baseChart = activeCharts[0];
     setActiveCharts(prev => [
       ...prev,
       {
         id: newId,
         title: `${chartType} Analysis`,
         type: chartType,
-        x_axis: activeCharts[0]?.x_axis,
-        y_axis: activeCharts[0]?.y_axis,
-        data: activeCharts[0]?.data || [],
-        insight_tooltip: `Uses the current dataset aggregation in a ${chartType.toLowerCase()} view.`
+        x_axis: baseChart?.x_axis,
+        y_axis: baseChart?.y_axis,
+        secondary_dimension: baseChart?.secondary_dimension,
+        data: baseChart?.data || [],
+        insight_tooltip: `Dynamic visual representation in a ${chartType.toLowerCase()} view.`
       }
     ]);
   };
@@ -277,7 +362,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
       const res = await uploadDataset(file);
       processDatasetResult(res, file.name);
     } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: `Upload Error: ${err.message}. Check backend server.` }]);
+      setChatHistory(prev => [...prev, { role: 'ai', text: `Upload Error: ${err.message}. Check backend connection.` }]);
     } finally {
       setIsUploading(false);
     }
@@ -306,31 +391,42 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     setDatasetSummary(res.summary);
     setDatasetId(res.dataset_id);
     setForecast(res.forecast || null);
+    if (res.plan_source) setPlanSource(res.plan_source);
     
-    const kpi = res.summary.primary_kpi || 'Sales';
+    setDashboardTitle(res.dashboard_title || `${res.summary.primary_kpi || 'Domain'} Analytics Dashboard`);
+    
+    const kpi = res.kpi_summary?.primary_kpi || res.summary.primary_kpi || 'Primary Metric';
     setKpiSummary({
       primary_kpi: kpi,
-      value: typeof res.kpi_summary?.value === 'number' ? res.kpi_summary.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—',
-      data_quality: res.summary.quality_score || 98.5,
-      total_rows: res.summary.row_count.toLocaleString()
+      value: res.kpi_summary?.formatted_value || (typeof res.kpi_summary?.value === 'number' ? res.kpi_summary.value.toLocaleString() : '—'),
+      secondary_kpi: res.kpi_summary?.secondary_kpi || null,
+      secondary_value: res.kpi_summary?.secondary_formatted_value || null,
+      data_quality: res.kpi_summary?.data_quality || res.summary.quality_score || 100.0,
+      total_rows: (res.kpi_summary?.total_rows || res.summary.row_count || 0).toLocaleString()
     });
 
     if (res.charts && res.charts.length > 0) {
       setActiveCharts(res.charts.map((c, i) => ({
-        id: `auto-${i}`,
+        id: c.id || `auto-${i}`,
         title: c.title || `${c.type} Overview`,
-        type: c.type === 'Area' ? 'Area Graph' : c.type === 'Bar' ? 'Bar Chart' : c.type === 'Donut' ? 'Donut Chart' : c.type === 'Scatter' ? 'Scatterplot' : c.type,
+        type: c.type,
         x_axis: c.x_axis,
         y_axis: c.y_axis,
+        secondary_dimension: c.secondary_dimension,
+        matrix_data: c.matrix_data,
         data: c.data || [],
-        insight_tooltip: c.insight_tooltip || `Automated insight for ${kpi}.`
+        insight_tooltip: c.insight_tooltip || `Automated calculation for ${kpi}.`
       })));
     }
 
-    setDetailedReport(res.ai_insights?.join('\n\n') || 'Initial analysis complete. Ask a question for a detailed report.');
+    if (res.ai_insights) {
+      setRecommendations(res.ai_insights);
+    }
+
+    setDetailedReport(res.ai_insights?.join('\n\n') || 'Initial analysis complete. Ask any analytical query to generate an executive report.');
     setChatHistory(prev => [...prev, { 
       role: 'ai', 
-      text: `Successfully ingested and cleaned ${filename} (${res.summary.row_count} rows, ${res.summary.column_count} columns). Data quality score: ${res.summary.quality_score}%. Dashboard updated!` 
+      text: `Dataset "${filename}" ingested & cleansed (${res.summary.row_count.toLocaleString()} rows, ${res.summary.column_count} dimensions). Data Integrity: ${res.summary.quality_score}%. Visualized ${res.charts?.length || 6} charts!` 
     }]);
   };
 
@@ -342,7 +438,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
       await downloadDataset(datasetId, fallback);
       setChatHistory(prev => [...prev, { 
         role: 'ai', 
-        text: '📥 Successfully exported and downloaded the preprocessed CSV dataset.' 
+        text: '📥 Successfully exported and downloaded cleaned dataset in CSV format.' 
       }]);
     } catch (err) {
       setChatHistory(prev => [...prev, { 
@@ -356,15 +452,15 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   };
 
   const preprocessKeywords = [
-  "add a column","add column","drop column","remove column","rename column","fill missing","fill in missing","change type","convert column","filter rows","filter out"
-];
+    "add a column","add column","drop column","remove column","rename column","fill missing","fill in missing","change type","convert column","filter rows","filter out"
+  ];
 
-const isPreprocessCommand = (msg) => {
-  const lower = msg.toLowerCase();
-  return preprocessKeywords.some(kw => lower.includes(kw));
-};
+  const isPreprocessCommand = (msg) => {
+    const lower = msg.toLowerCase();
+    return preprocessKeywords.some(kw => lower.includes(kw));
+  };
 
-const handleChatSubmit = async (e) => {
+  const handleChatSubmit = async (e) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
     
@@ -373,21 +469,18 @@ const handleChatSubmit = async (e) => {
     setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
 
     if (!datasetId) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: 'Please upload a CSV or Excel dataset first so I can calculate a real answer.' }]);
+      setChatHistory(prev => [...prev, { role: 'ai', text: 'Please upload a CSV/Excel dataset or load the sample data first to run analytical queries.' }]);
       return;
     }
 
     if (isPreprocessCommand(userMsg)) {
-      // Preprocessing path
-      setChatHistory(prev => [...prev, { role: 'ai', text: '⚙️ Processing preprocessing command...' }]);
+      setChatHistory(prev => [...prev, { role: 'ai', text: '⚙️ Executing dataset preprocessing...' }]);
       try {
         const res = await preprocessDataset(datasetId, userMsg);
         setChatHistory(prev => {
           const updated = [...prev];
           if (updated[updated.length - 1]?.role === 'ai') {
             updated[updated.length - 1] = { role: 'ai', text: res.confirmation_message || 'Preprocessing completed.' };
-          } else {
-            updated.push({ role: 'ai', text: res.confirmation_message || 'Preprocessing completed.' });
           }
           return updated;
         });
@@ -399,8 +492,6 @@ const handleChatSubmit = async (e) => {
           const updated = [...prev];
           if (updated[updated.length - 1]?.role === 'ai') {
             updated[updated.length - 1] = { role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' };
-          } else {
-            updated.push({ role: 'ai', text: err.message || 'Preprocessing failed.', type: 'error' });
           }
           return updated;
         });
@@ -408,41 +499,24 @@ const handleChatSubmit = async (e) => {
       return;
     }
 
-    // Normal query path
-    setChatHistory(prev => [...prev, { role: 'ai', text: '🧠 Nemotron-3 Reasoning in progress...' }]);
+    // Normal analytical query path with live reasoning
+    setIsThinking(true);
+    setActiveReasoningText('');
 
-    let lastThinking = '';
+    let accumulatedReasoning = '';
 
     await streamAIQuery(
       userMsg,
       datasetId,
       (thinkingChunk) => {
-        lastThinking += thinkingChunk;
-        setChatHistory(prev => {
-          const updated = [...prev];
-          if (updated[updated.length - 1]?.role === 'ai') {
-            updated[updated.length - 1].text = `🧠 Reasoning: ${lastThinking.slice(-200)}`;
-          }
-          return updated;
-        });
+        accumulatedReasoning += thinkingChunk;
+        setActiveReasoningText(accumulatedReasoning);
       },
       (payload) => {
+        setIsThinking(false);
+        setActiveReasoningText('');
         if (!payload) return;
-        
-        // Handle conversational response
-        if (payload.type === 'chat' || payload.message) {
-          const msg = payload.message || payload.content || "Hello! How can I help you analyze your data today?";
-          setChatHistory(prev => {
-            const updated = [...prev];
-            if (updated[updated.length - 1]?.role === 'ai') {
-              updated[updated.length - 1].text = msg;
-            }
-            return updated;
-          });
-          return;
-        }
 
-        // Handle visualization layout update
         if (payload.dashboard_title) {
           setDashboardTitle(payload.dashboard_title);
         }
@@ -453,8 +527,10 @@ const handleChatSubmit = async (e) => {
             type: c.type,
             x_axis: c.x_axis,
             y_axis: c.y_axis,
+            secondary_dimension: c.secondary_dimension,
+            matrix_data: c.matrix_data,
             data: c.data || [],
-            insight_tooltip: c.insight_tooltip || 'Generated from the uploaded dataset.'
+            insight_tooltip: c.insight_tooltip || 'Verified calculation from cleaned dataset.'
           })));
         }
         if (payload.ai_recommendations) {
@@ -464,41 +540,55 @@ const handleChatSubmit = async (e) => {
           setKpiSummary(prev => ({
             ...prev,
             primary_kpi: payload.kpi_summary.primary_kpi || prev.primary_kpi,
-            value: typeof payload.kpi_summary.value === 'number' ? payload.kpi_summary.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : prev.value,
+            value: payload.kpi_summary.formatted_value || (typeof payload.kpi_summary.value === 'number' ? payload.kpi_summary.value.toLocaleString() : prev.value),
             total_rows: payload.kpi_summary.total_rows?.toLocaleString?.() || prev.total_rows,
             data_quality: payload.kpi_summary.data_quality ?? prev.data_quality
           }));
         }
         if (payload.detailed_report) setDetailedReport(payload.detailed_report);
         if (payload.forecast) setForecast(payload.forecast);
+        if (payload.plan_source) setPlanSource(payload.plan_source);
 
-        setChatHistory(prev => {
-          const updated = [...prev];
-          if (updated[updated.length - 1]?.role === 'ai') {
-            updated[updated.length - 1].text = `✨ Dashboard updated for "${userMsg}" with ${payload.suggested_charts?.length || 4} optimized visualizations.`;
+        const sourceLabel = payload.plan_source === 'llm' ? '✨ Nemotron-3 Ultra 550B' : '⚙️ Rule-based fallback';
+
+        setChatHistory(prev => [
+          ...prev,
+          {
+            role: 'ai',
+            text: `✨ Dashboard updated with ${payload.suggested_charts?.length || 6} visualizations for: "${userMsg}".`,
+            sourceLabel: sourceLabel,
+            fullReasoning: accumulatedReasoning,
           }
-          return updated;
-        });
+        ]);
       },
-      (err) => {
-        setChatHistory(prev => [...prev, { role: 'ai', text: `AI Connection Note: ${err}` }]);
+      (error) => {
+        setIsThinking(false);
+        setActiveReasoningText('');
+        setChatHistory(prev => [
+          ...prev,
+          {
+            role: 'ai',
+            text: `Query Error: ${error}`,
+            type: 'error'
+          }
+        ]);
       }
     );
   };
 
-  const handlePromptClick = (promptText) => {
-    setChatInput(promptText);
+  const handlePromptClick = (prompt) => {
+    setChatInput(prompt);
   };
 
-const fetchPreview = async (page = 1) => {
+  const fetchPreview = async (pageNum = 1) => {
     if (!datasetId) return;
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const data = await fetchDatasetPreview(datasetId, page, previewData.page_size);
+      const data = await fetchDatasetPreview(datasetId, pageNum, 50);
       setPreviewData(data);
     } catch (err) {
-      setPreviewError(err.message);
+      setPreviewError(err.message || 'Failed to load preview');
     } finally {
       setPreviewLoading(false);
     }
@@ -511,213 +601,21 @@ const fetchPreview = async (page = 1) => {
     }
   };
 
-  const DatasetPreviewView = () => {
-    const { columns, rows, total_rows, page, page_size, total_pages, cleaning_summary } = previewData;
-    const [cleaningExpanded, setCleaningExpanded] = useState(false);
-    const [showAllImputation, setShowAllImputation] = useState(false);
-    const [showAllHighMissing, setShowAllHighMissing] = useState(false);
-    const [showAllOutliers, setShowAllOutliers] = useState(false);
-
-    const renderChips = (items, showAll, setShowAll, label) => {
-      if (!items || items.length === 0) return null;
-      const display = showAll ? items : items.slice(0, 5);
-      const hiddenCount = items.length - display.length;
-      return (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
-          {display.map((item, i) => (
-            <span key={i} style={{
-              padding: '4px 10px',
-              borderRadius: '999px',
-              background: 'var(--c-glass-bg)',
-              border: '1px solid var(--c-glass-border)',
-              fontSize: '0.78rem',
-              color: 'var(--c-text)',
-              whiteSpace: 'nowrap'
-            }}>
-              {item}
-            </span>
-          ))}
-          {hiddenCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowAll(!showAll)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: '999px',
-                background: 'transparent',
-                border: '1px dashed var(--c-glass-border)',
-                fontSize: '0.78rem',
-                color: 'var(--c-text-secondary)',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Show {hiddenCount} more
-            </button>
-          )}
-        </div>
-      );
-    };
-
-    const renderCleaningSummary = () => {
-      if (!cleaning_summary) return null;
-      const { rows_before, rows_after, duplicates_removed, imputation_details, high_missing_flagged, outlier_treatment_details } = cleaning_summary;
-      const adjustedCols = new Set([
-        ...(imputation_details || []).map(s => s.split(':')[0].trim()),
-        ...(high_missing_flagged || []).map(s => s.split(':')[0].trim()),
-        ...(outlier_treatment_details || []).map(s => s.split(':')[0].trim())
-      ]).size;
-
-      const summaryLine = `${rows_after} rows after cleaning · ${adjustedCols} column${adjustedCols !== 1 ? 's' : ''} adjusted — click to ${cleaningExpanded ? 'collapse' : 'expand'}`;
-
-      return (
-        <div className="glass-panel" style={{ borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' }}>
-          <button
-            type="button"
-            onClick={() => setCleaningExpanded(!cleaningExpanded)}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--c-text)',
-              fontSize: '0.85rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              textAlign: 'left'
-            }}
-          >
-            <span>{summaryLine}</span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--c-text-secondary)' }}>
-              {cleaningExpanded ? '▲' : '▼'}
-            </span>
-          </button>
-{cleaningExpanded ? (
-            <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--c-glass-border)' }}>
-              <div style={{ marginBottom: '12px' }}>
-                <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--c-text)', marginBottom: '4px' }}>
-                  {rows_before} → {rows_after} rows ({duplicates_removed} duplicates removed)
-                </div>
-                {renderChips(imputation_details, showAllImputation, setShowAllImputation, 'Imputation')}
-                {renderChips(high_missing_flagged, showAllHighMissing, setShowAllHighMissing, 'High missing')}
-                {renderChips(outlier_treatment_details, showAllOutliers, setShowAllOutliers, 'Outliers')}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      );
-    };
-
-    if (!datasetId) {
-      return (
-        <div className="glass-panel" style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--c-text-secondary)', borderRadius: '12px' }}>
-          <Database size={44} style={{ margin: '0 auto 16px', opacity: 0.5, display: 'block' }} />
-          <h3 style={{ fontSize: '1.15rem', color: 'var(--c-text)', marginBottom: '8px' }}>No Dataset Loaded</h3>
-          <p style={{ maxWidth: '440px', margin: '0 auto', fontSize: '0.9rem', lineHeight: '1.5' }}>
-            Upload a CSV or Excel dataset, or load sample data from the dashboard to preview and download preprocessed data.
-          </p>
-        </div>
-      );
-    }
-
-    if (previewLoading) {
-      return (
-        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>
-          Loading…
-        </div>
-      );
-    }
-
-    if (previewError) {
-      return (
-        <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px', color: 'var(--c-accent-orange)' }}>
-          Error: {previewError}
-        </div>
-      );
-    }
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'auto' }}>
-        {renderCleaningSummary()}
-        <div className="glass-panel" style={{ borderRadius: '12px', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {columns.length > 0 && (
-            <div style={{ overflowX: 'auto', flex: 1 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <tr style={{ background: 'var(--c-glass-bg)', borderBottom: '1px solid var(--c-glass-border)' }}>
-                    {columns.map(col => (
-                      <th key={col} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: 'var(--c-text)', whiteSpace: 'nowrap' }}>{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--c-glass-border)', background: i % 2 === 0 ? 'transparent' : 'var(--c-glass-bg)' }}>
-                      {columns.map(col => (
-                        <td key={col} style={{ padding: '10px 12px', color: 'var(--c-text)', whiteSpace: 'nowrap' }}>
-                          {row[col] === null || row[col] === undefined ? <span style={{ color: 'var(--c-text-muted)' }}>-</span> : String(row[col])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                  {rows.length === 0 && (
-                    <tr>
-                      <td colSpan={columns.length} style={{ padding: '20px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>No data</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--c-glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
-              Page {page} of {total_pages || 1} — {total_rows} rows total
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button 
-                className="btn btn-glass"
-                onClick={handleDownloadData}
-                disabled={!datasetId || isDownloading}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                title="Download full preprocessed dataset in CSV format"
-              >
-                <Download size={14} />
-                {isDownloading ? 'Downloading...' : 'Download CSV'}
-              </button>
-              <button 
-                className="btn btn-glass"
-                disabled={page <= 1}
-                onClick={() => fetchPreview(page - 1)}
-              >
-                Previous
-              </button>
-              <button 
-                className="btn btn-glass"
-                disabled={page >= total_pages}
-                onClick={() => fetchPreview(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
-
-        </div>
-    );
-  };
-
   return (
     <div className="dashboard-layout">
-      {/* Add Chart Modal */}
+      {(isThinking || isUploading || isDownloading) && <div className="top-shimmer-bar" />}
+
       <AddChartModal 
         isOpen={isAddModalOpen} 
         onClose={() => setIsAddModalOpen(false)} 
         onAddChart={handleAddChart} 
       />
-      <ReportModal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)} report={detailedReport} />
+      <ReportModal 
+        isOpen={isReportOpen} 
+        onClose={() => setIsReportOpen(false)} 
+        report={detailedReport} 
+        datasetName={currentFileName}
+      />
 
       {/* Left Sidebar */}
       <aside className="sidebar glass-panel">
@@ -729,16 +627,13 @@ const fetchPreview = async (page = 1) => {
           <button className={`icon-btn ${activeView === 'dashboard' ? 'active' : ''}`} title="Dashboard" onClick={() => handleViewChange('dashboard')}>
             <LayoutDashboard size={20} />
           </button>
-          <button className={`icon-btn ${activeView === 'datasets' ? 'active' : ''}`} title="Datasets" onClick={() => handleViewChange('datasets')}>
+          <button className={`icon-btn ${activeView === 'datasets' ? 'active' : ''}`} title="Datasets Preview" onClick={() => handleViewChange('datasets')}>
             <Database size={20} />
           </button>
-          <button className="icon-btn" title="AI Chat"><MessageSquare size={20} /></button>
-          <button className="icon-btn" title="Forecasting"><LineChart size={20} /></button>
-          <button className="icon-btn" title="Reports"><FileText size={20} /></button>
         </div>
         <div className="sidebar-bottom">
-          <button className="icon-btn" onClick={toggleTheme} title="Toggle Theme">
-            <Settings size={20} />
+          <button className="icon-btn" title="Toggle Theme" onClick={toggleTheme}>
+            {theme === 'dark' ? '☀️' : '🌙'}
           </button>
         </div>
       </aside>
@@ -749,21 +644,56 @@ const fetchPreview = async (page = 1) => {
           <>
             <header className="workspace-header">
               <div>
-                <h2>{dashboardTitle}</h2>
-                <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
-                  Powered by NVIDIA Nemotron-3 Super 120B & Multi-Agent Engine
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  <h2>{dashboardTitle}</h2>
+                  {(isThinking || isUploading) && (
+                    <div className="ai-active-pill glass-panel">
+                      <div className="ai-pulse-dot" />
+                      <span className="ai-active-title">
+                        {isUploading ? 'Ingesting Dataset' : 'Nemotron-3 Ultra 550B'}
+                      </span>
+                      <span className="ai-active-step">
+                        {isUploading
+                          ? 'Cleansing & profiling schema'
+                          : activeReasoningText
+                            ? 'Streaming reasoning & aggregations'
+                            : 'Analyzing intent & selecting visuals'}
+                      </span>
+                      <span className="ai-active-timer">
+                        <Clock size={12} /> {elapsedTime.toFixed(1)}s
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>{currentFileName || 'No dataset loaded'}</span>
+                  {planSource && (
+                    <span style={{
+                      fontSize: '0.72rem', padding: '2px 8px', borderRadius: '999px',
+                      background: planSource === 'llm' ? 'rgba(139,92,246,0.15)' : 'rgba(245,158,11,0.15)',
+                      color: planSource === 'llm' ? 'var(--c-accent-purple)' : '#f59e0b',
+                      border: `1px solid ${planSource === 'llm' ? 'rgba(139,92,246,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                      fontWeight: 600,
+                    }}>
+                      {planSource === 'llm' ? '✨ Nemotron-3 Ultra 550B' : '⚙️ Rule-based fallback'}
+                    </span>
+                  )}
                 </div>
               </div>
 
               <div className="header-actions">
-                <button className="btn btn-glass" onClick={handleLoadSampleData} style={{ gap: '6px' }} disabled={isUploading}>
+                <button className="btn btn-glass" onClick={handleLoadSampleData} style={{ gap: '6px' }} disabled={isUploading || isThinking}>
                   <Play size={15} color="var(--c-accent-emerald)" /> Sample CSV
                 </button>
 
-                <label className="btn btn-glass" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload CSV'}
-                  <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} />
+                <label className="btn btn-glass" style={{ cursor: isUploading || isThinking ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: isUploading || isThinking ? 0.7 : 1 }}>
+                  <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload CSV/Excel'}
+                  <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} disabled={isUploading || isThinking} />
                 </label>
+
+                <button className="btn btn-glass" onClick={() => setIsReportOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>
+                  <FileText size={16} /> Executive Report
+                </button>
 
                 <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>
                   <Plus size={16} /> Add Chart
@@ -777,36 +707,72 @@ const fetchPreview = async (page = 1) => {
               gap: '16px', marginBottom: '20px'
             }}>
               <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PRIMARY KPI ({kpiSummary.primary_kpi})</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+                  PRIMARY KPI ({kpiSummary.primary_kpi})
+                </span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--c-accent-blue)' }}>
                   {kpiSummary.value}
                 </div>
               </div>
 
+              {kpiSummary.secondary_kpi ? (
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+                    SECONDARY KPI ({kpiSummary.secondary_kpi})
+                  </span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-emerald)' }}>
+                    {kpiSummary.secondary_value || '—'}
+                  </div>
+                </div>
+              ) : (
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>CLEANED RECORDS</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                    {kpiSummary.total_rows}
+                  </div>
+                </div>
+              )}
+
               <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>TOTAL DATA RECORDS</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
-                  {kpiSummary.total_rows}
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+                  {kpiSummary.secondary_kpi ? 'CLEANED RECORDS' : 'DATA QUALITY SCORE'}
+                </span>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: kpiSummary.secondary_kpi ? 'var(--c-text)' : 'var(--c-accent-emerald)' }}>
+                  {kpiSummary.secondary_kpi ? kpiSummary.total_rows : `${kpiSummary.data_quality}%`}
                 </div>
               </div>
 
               <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>DATA INTEGRITY SCORE</span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-emerald)' }}>
-                  {kpiSummary.data_quality}%
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>PROJECTED 90-DAY GROWTH</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+                  {forecast?.projected_growth_rate ? 'PROJECTED GROWTH RATE' : 'DATA INTEGRITY'}
+                </span>
                 <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-purple)' }}>
-                  {forecast?.projected_growth_rate || '—'}
+                  {forecast?.projected_growth_rate || `${kpiSummary.data_quality}%`}
                 </div>
               </div>
             </div>
 
             {/* Canvas & Charts */}
             <div className="canvas">
+              {isThinking && (
+                <div className="canvas-processing-banner glass-panel">
+                  <div className="banner-left">
+                    <Sparkles size={18} color="var(--c-accent-purple)" className="animate-spin-slow" />
+                    <div>
+                      <div className="banner-text">NVIDIA Nemotron-3 Ultra 550B is formulating visual intelligence...</div>
+                      <div className="banner-subtext">
+                        {activeReasoningText 
+                          ? 'Streaming live thoughts, verifying column axes, and calculating distributions...' 
+                          : 'Parsing prompt intent and selecting optimal chart compositions...'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ai-active-timer">
+                    <Clock size={12} /> {elapsedTime.toFixed(1)}s
+                  </div>
+                </div>
+              )}
+
               {activeCharts.map((chart) => (
                 <ChartCard 
                   key={chart.id}
@@ -819,34 +785,41 @@ const fetchPreview = async (page = 1) => {
               ))}
 
               {!activeCharts.length && !isUploading && (
-                <div className="recommendation-card liquid-glass">
-                  <div className="rec-header"><Database size={18} color="var(--c-accent-purple)" /><h3>Ready for your data</h3></div>
-                  <p style={{ fontSize: '0.9rem' }}>Upload a CSV or Excel dataset. The dashboard will clean it and render real charts from it.</p>
+                <div className="recommendation-card liquid-glass" style={{ gridColumn: '1 / -1', padding: '32px', textAlign: 'center' }}>
+                  <Database size={36} color="var(--c-accent-purple)" style={{ margin: '0 auto 12px' }} />
+                  <h3 style={{ fontSize: '1.2rem', marginBottom: '8px' }}>Ready to Analyze Your Data</h3>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--c-text-secondary)', maxWidth: '480px', margin: '0 auto' }}>
+                    Upload any CSV or Excel file, or click "Sample CSV" above. The application will automatically execute automated EDA, data cleaning, and Nemotron-powered dashboard visual generation.
+                  </p>
                 </div>
               )}
               
               {/* Recommendation Card */}
-              <div className="recommendation-card liquid-glass">
-                <div className="rec-header">
-                  <Sparkles size={18} color="var(--c-accent-purple)" />
-                  <h3>AI Recommendations</h3>
+              {activeCharts.length > 0 && (
+                <div className="recommendation-card liquid-glass">
+                  <div className="rec-header">
+                    <Sparkles size={18} color="var(--c-accent-purple)" />
+                    <h3>Automated Insights & Recommendations</h3>
+                  </div>
+                  <ul style={{ paddingLeft: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {recommendations.map((rec, i) => (
+                      <li key={i}>{rec}</li>
+                    ))}
+                  </ul>
+                  <button className="btn btn-primary" style={{marginTop: '16px', width: '100%'}} onClick={() => setIsReportOpen(true)}>
+                    View Executive Report
+                  </button>
                 </div>
-                <ul style={{ paddingLeft: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {recommendations.map((rec, i) => (
-                    <li key={i}>{rec}</li>
-                  ))}
-                </ul>
-                <button className="btn btn-primary" style={{marginTop: '16px', width: '100%'}} onClick={() => setIsReportOpen(true)}>View detailed report</button>
-              </div>
+              )}
             </div>
           </>
         ) : (
-          <div style={{ height: 'calc(100% - 80px)', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: 'calc(100% - 20px)', display: 'flex', flexDirection: 'column' }}>
             <header className="workspace-header" style={{ flexShrink: 0 }}>
               <div>
-                <h2>Dataset Preview</h2>
+                <h2>Dataset Preview & Preprocessing</h2>
                 <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
-                  Cleaned & preprocessed data view {currentFileName ? `• ${currentFileName}` : ''}
+                  Cleaned & preprocessed table view {currentFileName ? `• ${currentFileName}` : ''}
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -858,11 +831,54 @@ const fetchPreview = async (page = 1) => {
                   title="Download full preprocessed dataset in CSV format"
                 >
                   <Download size={16} />
-                  {isDownloading ? 'Downloading...' : 'Download CSV'}
+                  {isDownloading ? 'Downloading...' : 'Download Cleaned CSV'}
                 </button>
               </div>
             </header>
-            <DatasetPreviewView />
+            
+            <div className="glass-panel" style={{ borderRadius: '16px', overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}>
+              {previewLoading ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>Loading records...</div>
+              ) : previewError ? (
+                <div style={{ padding: '24px', color: 'var(--c-accent-orange)' }}>Error: {previewError}</div>
+              ) : previewData.columns.length > 0 ? (
+                <>
+                  <div style={{ overflowX: 'auto', flex: 1 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                        <tr style={{ background: 'var(--c-glass-bg)', borderBottom: '1px solid var(--c-glass-border)' }}>
+                          {previewData.columns.map(col => (
+                            <th key={col} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--c-text)', whiteSpace: 'nowrap' }}>{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.rows.map((row, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid var(--c-glass-border)', background: i % 2 === 0 ? 'transparent' : 'var(--c-glass-bg)' }}>
+                            {previewData.columns.map(col => (
+                              <td key={col} style={{ padding: '10px 14px', color: 'var(--c-text)', whiteSpace: 'nowrap' }}>
+                                {row[col] === null || row[col] === undefined ? <span style={{ color: 'var(--c-text-muted)' }}>-</span> : String(row[col])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: '12px 16px', borderTop: '1px solid var(--c-glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
+                      Page {previewData.page} of {previewData.total_pages || 1} — {previewData.total_rows.toLocaleString()} total rows
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button className="btn btn-glass" disabled={previewData.page <= 1} onClick={() => fetchPreview(previewData.page - 1)}>Previous</button>
+                      <button className="btn btn-glass" disabled={previewData.page >= previewData.total_pages} onClick={() => fetchPreview(previewData.page + 1)}>Next</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>No dataset loaded. Upload a file to preview.</div>
+              )}
+            </div>
           </div>
         )}
       </main>
@@ -875,35 +891,81 @@ const fetchPreview = async (page = 1) => {
           </div>
           <div>
             <h3>AutoInsights Copilot</h3>
-            <span style={{ fontSize: '0.75rem', color: 'var(--c-accent-emerald)', fontWeight: 600 }}>● Nemotron Agent Online</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--c-accent-emerald)', fontWeight: 600 }}>● Nemotron-3 Ultra 550B</span>
           </div>
         </div>
         
         <div className="chat-history">
           {chatHistory.map((msg, idx) => (
             <div key={idx} className={`chat-bubble ${msg.role}`} style={msg.type === 'error' ? { borderLeft: '4px solid var(--c-accent-orange)', background: 'rgba(255,165,0,0.15)' } : {}}>
-              {msg.text}
+              <div style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div>
+              {msg.role === 'ai' && msg.sourceLabel && (
+                <div style={{ marginTop: '6px' }}>
+                  <span style={{
+                    fontSize: '0.7rem', padding: '2px 7px', borderRadius: '999px',
+                    background: 'rgba(139,92,246,0.15)',
+                    color: 'var(--c-accent-purple)',
+                    border: '1px solid rgba(139,92,246,0.3)',
+                    fontWeight: 600,
+                  }}>
+                    {msg.sourceLabel}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
+
+          {/* Real-Time Live Reasoning Box when isThinking is active */}
+          {isThinking && (
+            <div className="live-reasoning-card animate-fade-in-up">
+              <div className="reasoning-header">
+                <div className="reasoning-title-group">
+                  <div className="ai-pulse-dot" />
+                  <span>Nemotron-3 Ultra 550B Active</span>
+                </div>
+                <span className="ai-active-timer">
+                  <Clock size={11} /> {elapsedTime.toFixed(1)}s
+                </span>
+              </div>
+              <div className="terminal-reasoning-stream">
+                {activeReasoningText || 'Connecting to NVIDIA Ultra 550B inference gateway & synthesizing schema...'}
+                <span className="cursor-blink" />
+              </div>
+              <div className="step-chips">
+                <span className="step-chip done"><Check size={10} /> Schema Ready</span>
+                <span className={`step-chip ${activeReasoningText ? 'active' : 'pending'}`}>
+                  <Activity size={10} /> {activeReasoningText ? 'Ultra 550B Reasoning' : 'Synthesizing'}
+                </span>
+                <span className="step-chip pending">
+                  <BarChart2 size={10} /> Materializing Visuals
+                </span>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
         </div>
 
         <div className="suggested-prompts">
-          <button onClick={() => handlePromptClick("Compare sales this year with last year")}>
-            "Compare sales this year with last year"
+          <button onClick={() => handlePromptClick("i want the insights of sales for the current year with respect to everything in the dataset")}>
+            "Insights of sales for current year with respect to everything"
           </button>
-          <button onClick={() => handlePromptClick("Forecast next month's revenue with 95% CI")}>
-            "Forecast next month's revenue with 95% CI"
+          <button onClick={() => handlePromptClick("Compare sales and profit across regions with stacked category breakdown")}>
+            "Compare sales & profit by region with stacked breakdown"
+          </button>
+          <button onClick={() => handlePromptClick("Forecast next 4 quarters with 95% confidence intervals")}>
+            "Forecast next 4 quarters with 95% confidence intervals"
           </button>
         </div>
 
         <form className="chat-input-area" onSubmit={handleChatSubmit}>
           <input 
             type="text" 
-            placeholder="Ask anything..." 
+            placeholder="Ask any question about your data..." 
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
+            disabled={isThinking}
           />
-          <button type="submit" className="send-btn">
+          <button type="submit" className="send-btn" disabled={isThinking}>
             <Sparkles size={16} />
           </button>
         </form>

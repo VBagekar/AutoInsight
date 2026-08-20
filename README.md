@@ -1,6 +1,6 @@
 # AutoInsight Analytics
 
-Upload a CSV or Excel dataset, then ask a question in plain language. Nexus cleans and profiles the data locally, computes the chart series locally, and renders an interactive dashboard from those real values.
+Upload a CSV or Excel dataset, then ask a question in plain language. AutoInsight cleans and profiles the data locally, computes the chart series locally, and renders an interactive dashboard from those real values.
 
 ## What works
 
@@ -8,7 +8,8 @@ Upload a CSV or Excel dataset, then ask a question in plain language. Nexus clea
 - Data profiling: schema, date/dimension/KPI detection, correlations, and quality score
 - Data-backed initial dashboard (trend, category breakdown, composition, and correlation where applicable)
 - Query-driven dashboard updates, tooltips, detailed report, and local forecast
-- Optional NVIDIA Nemotron-3 Super 120B planner. It receives only compact schema metadata, not the uploaded file or raw rows; all values displayed in charts remain locally computed and field-validated.
+- NVIDIA Nemotron-3 Ultra 550B planner for chart selection, narrative report generation, and query-intent resolution. It receives only compact schema metadata, not the uploaded file or raw rows; all values displayed in charts remain locally computed and field-validated.
+- Health endpoint (`GET /api/health`) and in-app AI Engine status badge so you always know whether the LLM is reachable.
 
 ## Run locally
 
@@ -18,7 +19,14 @@ Upload a CSV or Excel dataset, then ask a question in plain language. Nexus clea
    python -m pip install -r backend/requirements.txt
    ```
 
-2. Optional: copy `backend/.env.example` to `backend/.env` and set `NVIDIA_API_KEY`. Without a key, the deterministic local planner remains fully functional.
+2. Copy `backend/.env.example` to `backend/.env` and fill in your NVIDIA API key:
+
+   ```powershell
+   copy backend\.env.example backend\.env
+   # Then edit backend/.env and replace "your_nvidia_api_key_here" with your real key
+   ```
+
+   Without a key the deterministic local planner remains fully functional (the app runs in rule-based fallback mode and shows an amber status badge).
 
 3. In one terminal start the API:
 
@@ -35,6 +43,22 @@ Upload a CSV or Excel dataset, then ask a question in plain language. Nexus clea
 
 Open the Vite URL displayed in the terminal, then use **Sample CSV** or upload your own file.
 
-## Deployment note
+## Production deployment
 
-Dataset state is held in application memory for this local single-user deliverable. Before a multi-user/cloud deployment, move uploaded data to encrypted object storage and persist dataset metadata/session ownership in a database.
+- Set `VITE_API_BASE_URL` in a root-level `.env` file (or your CI/CD environment) to the deployed backend URL:
+
+  ```
+  VITE_API_BASE_URL=https://your-backend.example.com/api
+  ```
+
+  See `.env.example` at the project root for the template.
+
+- Dataset state is held in application memory for this local single-user deliverable. Before a multi-user/cloud deployment, move uploaded data to encrypted object storage and persist dataset metadata/session ownership in a database.
+
+## Security — API key handling
+
+> **NEVER put a real API key in `backend/.env.example`.**
+>
+> `.env.example` is committed to source control and is public. It must contain only a placeholder (`your_nvidia_api_key_here`). The real key lives exclusively in `backend/.env`, which is listed in `.gitignore` and must never be committed.
+>
+> If you accidentally commit a real key to `.env.example` or any other tracked file, rotate it immediately at [build.nvidia.com](https://build.nvidia.com) — treat the exposed key as compromised regardless of whether you have since deleted it, because git history preserves old file contents.

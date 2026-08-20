@@ -81,13 +81,18 @@ class AutomatedDataCleaner:
         df_cleaned = df.drop_duplicates()
         duplicates_removed = initial_rows - len(df_cleaned)
 
-        # Detect datetime columns
+        # Detect datetime columns (fast sampled check)
         datetime_cols: List[str] = []
         for col in df_cleaned.columns:
-            if not pd.api.types.is_datetime64_any_dtype(df_cleaned[col]):
+            if pd.api.types.is_datetime64_any_dtype(df_cleaned[col]):
+                datetime_cols.append(col)
+            elif (pd.api.types.is_string_dtype(df_cleaned[col]) or df_cleaned[col].dtype == object) and df_cleaned[col].notna().any():
+                col_lower = str(col).lower()
+                is_date_name = any(kw in col_lower for kw in ["date", "time", "year", "month", "day", "timestamp", "period"])
+                sample = df_cleaned[col].dropna().head(20)
                 try:
-                    parsed = pd.to_datetime(df_cleaned[col], errors='coerce')
-                    if parsed.notna().mean() > 0.8:
+                    parsed_sample = pd.to_datetime(sample, errors='coerce', format='mixed')
+                    if parsed_sample.notna().mean() >= 0.8 or (is_date_name and parsed_sample.notna().mean() >= 0.5):
                         datetime_cols.append(col)
                 except Exception:
                     pass

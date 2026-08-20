@@ -9,7 +9,7 @@ _env_path = _backend_dir / ".env"
 class Settings(BaseSettings):
     NVIDIA_API_KEY: str = ""
     NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
-    NVIDIA_MODEL: str = "nvidia/nemotron-3-super-120b-a12b"
+    NVIDIA_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
