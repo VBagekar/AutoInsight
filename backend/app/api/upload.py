@@ -1,5 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi.responses import Response
 from app.agents.orchestrator import master_orchestrator
+import io
+import pandas as pd
 
 router = APIRouter()
 
@@ -31,3 +34,36 @@ async def preview_dataset(dataset_id: str, page: int = Query(default=1, ge=1), p
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving dataset preview: {str(e)}")
+
+@router.get("/dataset/{dataset_id}/download")
+async def download_dataset(dataset_id: str):
+    """
+    Exports and downloads the latest cleaned/preprocessed dataset as a CSV file.
+    """
+    try:
+        ds = master_orchestrator.datasets.get(dataset_id)
+        if not ds:
+            raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+        
+        df: pd.DataFrame = ds["df"]
+        filename = ds.get("filename", "dataset")
+        base_name = filename.rsplit(".", 1)[0] if "." in filename else filename
+        export_filename = f"{base_name}_cleaned.csv"
+        
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_bytes = csv_buffer.getvalue().encode("utf-8")
+        
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{export_filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting dataset: {str(e)}")
+

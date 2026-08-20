@@ -103,18 +103,10 @@ const LandingPage = ({ onGetStarted, toggleTheme, theme }) => {
             <Sparkles className="logo-icon" size={24} />
             <span>AutoInsights</span>
           </div>
-          <div className="nav-links">
-            <a href="#features">Features</a>
-            <a href="#pricing">Pricing</a>
-            <a href="#docs">Documentation</a>
-            <a href="#api">API</a>
-            <a href="#about">About</a>
-          </div>
           <div className="nav-actions">
             <button className="theme-toggle" onClick={toggleTheme}>
               {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
             </button>
-            <a href="#login" className="login-link">Login</a>
             <button className="btn btn-primary" onClick={onGetStarted}>Get Started</button>
           </div>
         </div>
