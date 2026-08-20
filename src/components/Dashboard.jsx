@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   LayoutDashboard, Database, MessageSquare, LineChart, FileText, Settings, 
-  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play
+  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play, Download
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
-import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset } from '../api/client';
+import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset, downloadDataset } from '../api/client';
 import './Dashboard.css';
 
 // Chart Chooser Dropdown Component for single cards
@@ -235,6 +235,8 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
   const [previewData, setPreviewData] = useState({ columns: [], rows: [], total_rows: 0, page: 1, page_size: 50, total_pages: 0, cleaning_summary: null });
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(null);
+  const [currentFileName, setCurrentFileName] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
 
   
 
@@ -300,6 +302,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
 
   const processDatasetResult = (res, filename) => {
     if (!res || !res.summary) return;
+    setCurrentFileName(filename || res.summary?.filename || 'dataset');
     setDatasetSummary(res.summary);
     setDatasetId(res.dataset_id);
     setForecast(res.forecast || null);
@@ -329,6 +332,27 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
       role: 'ai', 
       text: `Successfully ingested and cleaned ${filename} (${res.summary.row_count} rows, ${res.summary.column_count} columns). Data quality score: ${res.summary.quality_score}%. Dashboard updated!` 
     }]);
+  };
+
+  const handleDownloadData = async () => {
+    if (!datasetId) return;
+    setIsDownloading(true);
+    try {
+      const fallback = currentFileName ? `${currentFileName.replace(/\.[^/.]+$/, "")}_cleaned.csv` : 'cleaned_dataset.csv';
+      await downloadDataset(datasetId, fallback);
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        text: '📥 Successfully exported and downloaded the preprocessed CSV dataset.' 
+      }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        text: `Download Error: ${err.message}`, 
+        type: 'error' 
+      }]);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const preprocessKeywords = [
@@ -587,6 +611,18 @@ const fetchPreview = async (page = 1) => {
       );
     };
 
+    if (!datasetId) {
+      return (
+        <div className="glass-panel" style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--c-text-secondary)', borderRadius: '12px' }}>
+          <Database size={44} style={{ margin: '0 auto 16px', opacity: 0.5, display: 'block' }} />
+          <h3 style={{ fontSize: '1.15rem', color: 'var(--c-text)', marginBottom: '8px' }}>No Dataset Loaded</h3>
+          <p style={{ maxWidth: '440px', margin: '0 auto', fontSize: '0.9rem', lineHeight: '1.5' }}>
+            Upload a CSV or Excel dataset, or load sample data from the dashboard to preview and download preprocessed data.
+          </p>
+        </div>
+      );
+    }
+
     if (previewLoading) {
       return (
         <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--c-text-secondary)' }}>
@@ -640,7 +676,17 @@ const fetchPreview = async (page = 1) => {
             <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)' }}>
               Page {page} of {total_pages || 1} — {total_rows} rows total
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button 
+                className="btn btn-glass"
+                onClick={handleDownloadData}
+                disabled={!datasetId || isDownloading}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                title="Download full preprocessed dataset in CSV format"
+              >
+                <Download size={14} />
+                {isDownloading ? 'Downloading...' : 'Download CSV'}
+              </button>
               <button 
                 className="btn btn-glass"
                 disabled={page <= 1}
@@ -800,8 +846,20 @@ const fetchPreview = async (page = 1) => {
               <div>
                 <h2>Dataset Preview</h2>
                 <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '2px' }}>
-                  Cleaned & preprocessed data view
+                  Cleaned & preprocessed data view {currentFileName ? `• ${currentFileName}` : ''}
                 </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button 
+                  className="btn btn-primary"
+                  onClick={handleDownloadData}
+                  disabled={!datasetId || isDownloading}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                  title="Download full preprocessed dataset in CSV format"
+                >
+                  <Download size={16} />
+                  {isDownloading ? 'Downloading...' : 'Download CSV'}
+                </button>
               </div>
             </header>
             <DatasetPreviewView />

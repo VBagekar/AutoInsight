@@ -95,3 +95,31 @@ export const preprocessDataset = async (datasetId, command) => {
   }
   return await response.json();
 };
+
+export const downloadDataset = async (datasetId, fallbackName = 'cleaned_dataset.csv') => {
+  const response = await fetch(`${BASE_URL}/dataset/${datasetId}/download`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to download dataset' }));
+    throw new Error(err.detail || 'Failed to download dataset');
+  }
+
+  let filename = fallbackName;
+  const disposition = response.headers.get('Content-Disposition');
+  if (disposition && disposition.includes('filename=')) {
+    const match = disposition.match(/filename=["']?([^"']+)["']?/);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
