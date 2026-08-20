@@ -118,22 +118,92 @@ class DashboardBuilder:
             plan.append({"type": "Histogram", "title": f"Distribution of {metric}", "y_axis": metric})
         return plan[:4]
 
-    def heuristic_plan(self, summary: Dict[str, Any], query: str) -> List[Dict[str, Any]]:
-        """Useful offline planner; understands the most common analytical intents."""
+    def heuristic_plan(self, summary: Dict[str, Any], query: str, intent: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Robust offline planner; understands common analytical intents.
+
+        When an ``intent`` dict (from IntentParser) is provided, uses its
+        structured fields for smarter chart selection.  Without it, falls back
+        to keyword matching — the app stays fully usable with zero LLM calls.
+        """
         lower = query.lower()
         metric = summary.get("primary_kpi") or (summary.get("numeric_columns") or [None])[0]
-        dates, cats, numeric = summary.get("date_columns", []), summary.get("categorical_columns", []), summary.get("numeric_columns", [])
-        selected_cat = next((c for c in cats if c.lower() in lower), cats[0] if cats else None)
-        selected_metric = next((c for c in numeric if c.lower() in lower), metric)
+        dates = summary.get("date_columns", [])
+        cats = summary.get("categorical_columns", [])
+        numeric = summary.get("numeric_columns", [])
+
+        # --- Extract intent-aware fields ---
+        intent_metrics = (intent or {}).get("metrics", [])
+        intent_dimensions = (intent or {}).get("dimensions", [])
+        time_filter = (intent or {}).get("time_filter")
+        comparison = (intent or {}).get("comparison")
+        top_bottom = (intent or {}).get("top_bottom")
+        is_overview = (intent or {}).get("is_overview", False)
+
+        # Pick best metric(s) and dimension(s)
+        selected_metric = intent_metrics[0] if intent_metrics else next((c for c in numeric if c.lower() in lower), metric)
+        selected_cat = (
+            intent_dimensions[0] if intent_dimensions
+            else next((c for c in cats if c.lower() in lower), cats[0] if cats else None)
+        )
+
         plans: List[Dict[str, Any]] = []
-        if any(word in lower for word in ("trend", "over time", "month", "year", "current year", "forecast")) and dates:
-            plans.append({"type": "Line Graph", "title": f"{selected_metric} trend over time", "x_axis": dates[0], "y_axis": selected_metric})
+
+        # --- Overview mode: return diverse set ---
+        if is_overview:
+            if dates and selected_metric:
+                plans.append({"type": "Area Graph", "title": f"{selected_metric} trend over time", "x_axis": dates[0], "y_axis": selected_metric})
+            if selected_cat and selected_metric:
+                plans.append({"type": "Bar Chart", "title": f"{selected_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": selected_metric})
+                plans.append({"type": "Donut Chart", "title": f"{selected_cat} share of {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric})
+            if len(numeric) >= 2:
+                plans.append({"type": "Scatterplot", "title": f"{numeric[1]} vs {numeric[0]}", "x_axis": numeric[0], "y_axis": numeric[1]})
+            if selected_metric and not plans:
+                plans.append({"type": "Histogram", "title": f"Distribution of {selected_metric}", "y_axis": selected_metric})
+            return (plans or self.default_plan(summary))[:5]
+
+        # --- Comparison queries: multiple metrics side-by-side ---
+        if comparison:
+            comp_cols = comparison.get("columns", [])
+            for comp_metric in comp_cols[:3]:
+                if comp_metric in numeric and selected_cat:
+                    plans.append({"type": "Bar Chart", "title": f"{comp_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": comp_metric})
+                elif comp_metric in numeric and dates:
+                    plans.append({"type": "Line Graph", "title": f"{comp_metric} trend", "x_axis": dates[0], "y_axis": comp_metric})
+            if len(comp_cols) >= 2 and all(c in numeric for c in comp_cols[:2]):
+                plans.append({"type": "Scatterplot", "title": f"{comp_cols[1]} vs {comp_cols[0]}", "x_axis": comp_cols[0], "y_axis": comp_cols[1]})
+
+        # --- Time-based queries ---
+        has_time_intent = (
+            time_filter
+            or any(word in lower for word in ("trend", "over time", "month", "year", "current year", "forecast", "growth", "decline", "quarterly", "monthly", "yearly"))
+        )
+        if has_time_intent and dates and selected_metric:
+            chart_type = "Area Graph" if any(w in lower for w in ("area", "growth", "cumulative")) else "Line Graph"
+            plans.append({"type": chart_type, "title": f"{selected_metric} trend over time", "x_axis": dates[0], "y_axis": selected_metric})
+
+        # --- Top / Bottom queries ---
+        if top_bottom and selected_cat and selected_metric:
+            direction = top_bottom.get("direction", "top")
+            n = top_bottom.get("n", 5)
+            plans.append({"type": "Bar Chart", "title": f"{direction.title()} {n} {selected_cat} by {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric})
+
+        # --- Category breakdown ---
         if selected_cat and selected_metric:
-            plans.append({"type": "Bar Chart", "title": f"{selected_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": selected_metric})
-            if any(word in lower for word in ("share", "composition", "distribution", "everything")):
+            # Avoid duplicate if already added by comparison or top/bottom
+            bar_exists = any(p.get("type") == "Bar Chart" and p.get("x_axis") == selected_cat and p.get("y_axis") == selected_metric for p in plans)
+            if not bar_exists:
+                plans.append({"type": "Bar Chart", "title": f"{selected_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": selected_metric})
+            if any(word in lower for word in ("share", "composition", "distribution", "proportion", "percentage", "everything")):
                 plans.append({"type": "Donut Chart", "title": f"{selected_cat} contribution", "x_axis": selected_cat, "y_axis": selected_metric})
-        if any(word in lower for word in ("correlation", "relationship", "compare")) and len(numeric) >= 2:
+
+        # --- Distribution / Histogram ---
+        if any(word in lower for word in ("distribution", "spread", "histogram", "frequency")) and selected_metric:
+            plans.append({"type": "Histogram", "title": f"Distribution of {selected_metric}", "y_axis": selected_metric})
+
+        # --- Correlation / Scatter ---
+        if any(word in lower for word in ("correlation", "relationship", "scatter")) and len(numeric) >= 2:
             plans.append({"type": "Scatterplot", "title": f"{numeric[1]} vs {numeric[0]}", "x_axis": numeric[0], "y_axis": numeric[1]})
+
         return (plans or self.default_plan(summary))[:5]
 
     def make_kpis(self, df: pd.DataFrame, summary: Dict[str, Any]) -> Dict[str, Any]:
