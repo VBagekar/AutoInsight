@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from difflib import get_close_matches
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
@@ -18,9 +19,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Supported Chart Types Catalog
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Supported Chart Types Catalog
 # ---------------------------------------------------------------------------
@@ -68,11 +66,25 @@ class NemotronLLMClient:
             self.client = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
-                timeout=45.0,
-                max_retries=2,
+                timeout=90.0,
+                max_retries=0,
             )
         else:
             self.client = None
+
+    def _call_with_retry(self, fn, max_attempts: int = 3, initial_delay: float = 1.5):
+        """Execute an API call with automatic backoff on rate limits."""
+        for attempt in range(max_attempts):
+            try:
+                return fn()
+            except openai.RateLimitError:
+                if attempt == max_attempts - 1:
+                    raise
+                wait_time = initial_delay * (2 ** attempt)
+                logger.warning("Rate limit encountered (429). Retrying in %.1fs (attempt %d/%d)...", wait_time, attempt + 1, max_attempts)
+                time.sleep(wait_time)
+            except Exception:
+                raise
 
     def _build_master_prompt(
         self,
@@ -80,7 +92,7 @@ class NemotronLLMClient:
         query: str,
         conversation_context: Optional[List[Dict[str, str]]] = None,
     ) -> str:
-        """Build a rich, dataset-aware prompt for NVIDIA Nemotron-3 Ultra 550B."""
+        """Build a rich, dataset-aware prompt for MiniMax-M3."""
         numeric = summary.get("numeric_columns", [])
         dates = summary.get("date_columns", [])
         categories = summary.get("categorical_columns", [])
@@ -130,7 +142,7 @@ class NemotronLLMClient:
                 "If the current query is a follow-up or refinement, build upon the previous context.\n"
             )
 
-        prompt = f"""You are the Lead Data Scientist & Visualization Architect for the AutoInsights analytics platform powered by NVIDIA Nemotron-3 Ultra 550B.
+        prompt = f"""You are the Lead Data Scientist & Visualization Architect for the AutoInsights analytics platform.
 Your task is to understand the user's dataset and question across ANY domain (Healthcare, IoT, HR, Finance, Operations, Science, Logistics, Education, etc.), then design a comprehensive, highly accurate interactive visual dashboard.
 
 === DATASET SCHEMA & PROFILE ===
@@ -163,22 +175,25 @@ Detailed Column Attributes:
 - Overview queries: Generate a diverse mix of 4-5 charts.
 
 === AGGREGATION & UNIT INTELLIGENCE ===
-- For rates, ratings, satisfaction, temperatures, heart rates, conversion percentages, latencies: use aggregation "mean" or "median" and format_type "percentage" or "decimal".
-- For counts, inventory volumes, sales, revenue, totals: use aggregation "sum" or "count".
+- For rates, ratings, satisfaction, temperatures, heart rates, conversion percentages, latencies, averages, scores, indexes: use aggregation "mean" or "median".
+- For counts, inventory volumes, sales, revenue, totals, quantity, units, items: use aggregation "sum" or "count".
+- For identifiers (patient IDs, order IDs, user IDs): use aggregation "count" or "count_distinct".
 - Use appropriate format_type ("currency", "percentage", "integer", "decimal", "duration", "scientific") and unit ("$", "%", "°C", "mg/dL", "ms", "users", etc.).
 
 === STRICT OUTPUT CONSTRAINTS ===
-1. ONLY use column names that strictly exist in the schema above. NEVER invent column names.
+1. ONLY use column names that EXACTLY match the schema above. Cross-verify every column name against the schema before including it. NEVER invent or hallucinate column names.
 2. For the user's query, return between 3 to 5 diverse, high-value, complementary charts.
 3. First chart must directly address the primary question.
 4. Ensure axes are assigned accurately:
    - x_axis: Must be a valid date or categorical column from the schema.
    - y_axis: Must be a valid numeric measure from the schema.
 5. Provide an insightful "insight_tooltip" for every chart highlighting key analytical takeaways.
+6. Return ONLY raw JSON. Do NOT wrap in markdown code fences. Do NOT include any preamble, explanation, or commentary before or after the JSON.
 
 === EDGE CASES ===
 - If no date columns exist, NEVER select Area Graph or Line Graph; use Bar Chart, Donut Chart, or Histogram.
 - If only one numeric column exists, NEVER select Scatterplot.
+- If the user asks for a chart type incompatible with available columns, substitute the closest valid alternative.
 
 === EXAMPLES ===
 Example 1:
@@ -200,7 +215,7 @@ Query: "Show sales trend over time"
 }}
 
 === OUTPUT FORMAT ===
-Return ONLY a valid JSON object matching this schema (no markdown, no preamble):
+Return ONLY a valid JSON object matching this schema:
 {{
   "dashboard_title": "Descriptive Dashboard Title",
   "charts": [
@@ -355,9 +370,10 @@ User Query: "{query}"
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
+                temperature=0.35,
                 top_p=0.95,
-                max_tokens=4096,
+                max_tokens=16384,
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
                 stream=True,
             )
 
@@ -394,14 +410,19 @@ User Query: "{query}"
                         validated.append(repaired)
 
             logger.info(
-                "Nemotron-3 Ultra 550B plan: %d charts validated, reasoning_len=%d",
+                "Nemotron-3 Ultra plan: %d charts validated, reasoning_len=%d",
                 len(validated),
                 len(full_reasoning),
             )
             yield {"type": "result", "charts": validated, "intent": resolved_intent, "title": dashboard_title}
 
+        except openai.RateLimitError as e:
+            logger.warning("NVIDIA API rate limit reached (429): %s", e)
+            yield {"type": "thinking", "content": "⚠️ Model API quota/rate-limit hit on NVIDIA gateway. Activating high-precision local heuristic analytics engine...\n"}
+            yield {"type": "result", "charts": [], "intent": None, "title": None}
         except Exception as e:
-            logger.warning("Nemotron-3 Ultra 550B stream exception: %s", e)
+            logger.warning("LLM stream exception: %s", e)
+            yield {"type": "thinking", "content": f"⚡ Note: LLM response unavailable ({type(e).__name__}). Using local verified analytics engine.\n"}
             yield {"type": "result", "charts": [], "intent": None, "title": None}
 
     def generate_chart_plan(
@@ -491,6 +512,7 @@ Generate the detailed analytical narrative now.
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
+                top_p=0.92,
                 max_tokens=2048,
             )
             report_text = (response.choices[0].message.content or "").strip()
@@ -535,7 +557,8 @@ Facts:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
+                temperature=0.3,
+                top_p=0.92,
                 max_tokens=512,
             )
             raw = (response.choices[0].message.content or "").strip()
@@ -589,7 +612,8 @@ Facts:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=800,
+                top_p=0.92,
+                max_tokens=512,
             )
             content = (response.choices[0].message.content or "").strip()
             if "```" in content:
@@ -606,7 +630,7 @@ Facts:
         summary: Dict[str, Any],
         sample_records: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], str]:
-        """Direct NVIDIA Nemotron-3 Ultra 550B to autonomously analyze the uploaded dataset,
+        """Direct MiniMax-M3 to autonomously analyze the uploaded dataset,
         deduce its domain (Healthcare, IoT, HR, Finance, Operations, Science, etc.),
         select primary & secondary KPIs (with appropriate aggregation & format),
         and architect 4 to 6 domain-optimized visualization specifications.
@@ -636,7 +660,7 @@ Facts:
         if samples:
             sample_rows_str = f"\nSample Records (Top 5 rows):\n{json.dumps(samples[:5], indent=2)}\n"
 
-        prompt = f"""You are the Principal AI Data Architect powered by NVIDIA Nemotron-3 Ultra 550B.
+        prompt = f"""You are the Principal AI Data Architect.
 A user has uploaded a new dataset for automated analytics and visualization.
 
 === DATASET PROFILE ===
@@ -707,18 +731,31 @@ Return ONLY valid JSON matching this exact structure:
 }}
 """
         try:
-            response = self.client.chat.completions.create(
+            stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=2500,
+                temperature=0.35,
+                top_p=0.95,
+                max_tokens=4096,
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
+                stream=True,
             )
-            content = (response.choices[0].message.content or "").strip()
+            full_content = ""
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    full_content += chunk.choices[0].delta.content
+
+            content = full_content.strip()
             if "```" in content:
                 if "```json" in content:
                     content = content.split("```json", 1)[1].split("```", 1)[0].strip()
                 else:
                     content = content.split("```", 1)[1].split("```", 1)[0].strip()
+
+            json_match = re.search(r"\{[\s\S]*\}", content)
+            if json_match:
+                content = json_match.group(0)
+
             data = json.loads(content)
 
             # Validate and repair charts

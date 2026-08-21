@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     NVIDIA_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+    MAX_UPLOAD_SIZE_MB: int = 100
 
     @property
     def is_llm_configured(self) -> bool:

@@ -5,7 +5,6 @@ import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Treemap, FunnelChart, Funnel,
   RadialBarChart, RadialBar, Legend
 } from 'recharts';
-import { timeSeriesData, categoricalData, scatterData, radarData, treemapData, funnelData } from '../data/mockData';
 
 const COLORS = [
   '#3b82f6', '#8b5cf6', '#10b981', '#06b6d4', '#f59e0b',
@@ -29,7 +28,40 @@ export const CATEGORIZED_CHARTS = {
 
 export const AVAILABLE_CHARTS = Object.values(CATEGORIZED_CHARTS).flat();
 
+// ---------------------------------------------------------------------------
+// Y-Axis Tick Formatter — abbreviates large numbers (K, M, B)
+// ---------------------------------------------------------------------------
+const formatYAxisTick = (value) => {
+  if (value === null || value === undefined) return '';
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  if (Number.isInteger(value)) return value.toLocaleString();
+  return value.toFixed(1);
+};
+
+// ---------------------------------------------------------------------------
+// Empty State Placeholder — rendered when no real data is available
+// ---------------------------------------------------------------------------
+const EmptyState = ({ chartType }) => (
+  <div style={{
+    width: '100%', height: '100%', minHeight: '200px',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    color: 'var(--c-text-secondary)', gap: '8px', padding: '24px',
+  }}>
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M9 21V9" />
+    </svg>
+    <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>No data available for {chartType || 'this chart'}</span>
+    <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Upload a dataset and run a query to populate this visualization</span>
+  </div>
+);
+
+// ---------------------------------------------------------------------------
 // PowerBI / Tableau Style Rich Interactive Tooltip
+// ---------------------------------------------------------------------------
 export const PowerBiTooltip = ({ active, payload, label, yAxis, xAxis }) => {
   if (active && payload && payload.length) {
     const mainItem = payload[0];
@@ -152,9 +184,13 @@ const CustomTreemapContent = (props) => {
 
 // Heatmap Renderer
 const RealHeatmapRenderer = ({ data, matrixData, xAxis, yAxis }) => {
-  const xLabels = matrixData?.x_labels || ['Cat A', 'Cat B', 'Cat C', 'Cat D'];
-  const yLabels = matrixData?.y_labels || ['Group 1', 'Group 2', 'Group 3'];
+  const xLabels = matrixData?.x_labels || [];
+  const yLabels = matrixData?.y_labels || [];
   const items = data || matrixData?.data || [];
+
+  if (!items.length || !xLabels.length || !yLabels.length) {
+    return <EmptyState chartType="Heatmap" />;
+  }
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', padding: '8px 12px' }}>
@@ -218,11 +254,11 @@ const RealHeatmapRenderer = ({ data, matrixData, xAxis, yAxis }) => {
 
 // Box Plot Renderer
 const RealBoxPlotRenderer = ({ data, xAxis, yAxis }) => {
-  const items = Array.isArray(data) && data.length ? data : [
-    { name: 'Category 1', min: 10, q1: 25, median: 45, q3: 65, max: 90 },
-    { name: 'Category 2', min: 20, q1: 35, median: 55, q3: 75, max: 100 },
-  ];
+  if (!Array.isArray(data) || data.length === 0) {
+    return <EmptyState chartType="Box Plot" />;
+  }
 
+  const items = data;
   const overallMax = Math.max(...items.map((it) => it.max || 100)) || 100;
   const overallMin = Math.min(...items.map((it) => it.min || 0)) || 0;
   const range = overallMax - overallMin || 1.0;
@@ -234,14 +270,14 @@ const RealBoxPlotRenderer = ({ data, xAxis, yAxis }) => {
       <line x1="45" y1="170" x2="310" y2="170" stroke="var(--c-glass-border)" strokeWidth="1.5" />
 
       {/* Y Axis ticks */}
-      {[0, 0.5, 1].map((pct, i) => {
+      {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
         const val = overallMin + range * (1 - pct);
         const y = 25 + pct * 140;
         return (
           <g key={i}>
             <line x1="40" y1={y} x2="45" y2={y} stroke="var(--c-text-secondary)" strokeWidth="1" />
             <text x="36" y={y + 4} textAnchor="end" fill="var(--c-text-secondary)" fontSize="9">
-              {val >= 1000 ? `${(val / 1000).toFixed(1)}k` : Math.round(val)}
+              {formatYAxisTick(val)}
             </text>
           </g>
         );
@@ -304,13 +340,17 @@ const RealBoxPlotRenderer = ({ data, xAxis, yAxis }) => {
   );
 };
 
+// ---------------------------------------------------------------------------
 // Master Chart Renderer Component
+// ---------------------------------------------------------------------------
 export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, matrixData }) => {
   const metricName = yAxis || 'Value';
   const hasRealData = Array.isArray(data) && data.length > 0;
-  const chartData = hasRealData ? data : timeSeriesData;
-  const categoryData = hasRealData ? data : categoricalData;
-  const scatterPoints = hasRealData ? data : scatterData;
+
+  // If no real data, show empty state — NEVER fall back to mock data
+  if (!hasRealData) {
+    return <EmptyState chartType={type} />;
+  }
 
   switch (type) {
     // 1. AREA GRAPH (Smooth Volume Gradient)
@@ -318,8 +358,8 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     case 'Area':
     case 'Stacked Area Graph':
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <AreaChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
             <defs>
               <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.45} />
@@ -328,7 +368,7 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
             <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
             <Area
               type="monotone"
@@ -347,11 +387,11 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     case 'Line Graph':
     case 'Line':
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <LineChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
             <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
             <Line
               type="monotone"
@@ -370,14 +410,14 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     case 'Bar Chart':
     case 'Bar':
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={categoryData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
             <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
             <Bar dataKey="value" name={metricName} radius={[6, 6, 0, 0]}>
-              {categoryData.map((_, index) => (
+              {data.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Bar>
@@ -388,15 +428,30 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     // 4. STACKED BAR GRAPH & MULTI-SET BAR
     case 'Stacked Bar Graph':
     case 'Multi-set Bar Chart': {
-      const secondaryKeys = (data && data[0]?.secondary_keys) || ['Direct', 'Partner'];
+      const secondaryKeys = (data && data[0]?.secondary_keys) || [];
       const isStacked = type === 'Stacked Bar Graph';
 
+      if (!secondaryKeys.length) {
+        // Fallback to simple bar if no secondary keys
+        return (
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
+              <XAxis dataKey="name" {...axisProps} />
+              <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
+              <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
+              <Bar dataKey="value" name={metricName} fill={COLORS[0]} radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        );
+      }
+
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
             <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
             <Legend verticalAlign="top" height={32} iconType="circle" wrapperStyle={{ fontSize: '11px', color: 'var(--c-text-secondary)' }} />
             {secondaryKeys.map((secKey, i) => (
@@ -421,10 +476,10 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     case 'Pie': {
       const isDonut = type.toLowerCase().includes('donut');
       return (
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
           <PieChart>
             <Pie
-              data={categoryData}
+              data={data}
               cx="50%"
               cy="50%"
               innerRadius={isDonut ? 55 : 0}
@@ -435,7 +490,7 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
               stroke="var(--c-bg)"
               strokeWidth={2}
             >
-              {categoryData.map((_, index) => (
+              {data.map((_, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
@@ -450,14 +505,14 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     case 'Scatterplot':
     case 'Scatter':
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart margin={{ top: 12, right: 12, bottom: 12, left: -16 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <ScatterChart margin={{ top: 12, right: 12, bottom: 12, left: -4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--c-glass-border)" opacity={0.6} />
-            <XAxis type="number" dataKey="x" name={xAxis || 'X'} {...axisProps} />
-            <YAxis type="number" dataKey="y" name={yAxis || 'Y'} {...axisProps} />
+            <XAxis type="number" dataKey="x" name={xAxis || 'X'} {...axisProps} tickFormatter={formatYAxisTick} />
+            <YAxis type="number" dataKey="y" name={yAxis || 'Y'} {...axisProps} tickFormatter={formatYAxisTick} />
             <ZAxis type="number" dataKey="z" range={[60, 200]} />
             <RechartsTooltip cursor={{ strokeDasharray: '3 3' }} content={<PowerBiTooltip yAxis={yAxis} xAxis={xAxis} />} />
-            <Scatter name={`${yAxis || 'Y'} vs ${xAxis || 'X'}`} data={scatterPoints} fill="#8b5cf6" opacity={0.8} />
+            <Scatter name={`${yAxis || 'Y'} vs ${xAxis || 'X'}`} data={data} fill="#8b5cf6" opacity={0.8} />
           </ScatterChart>
         </ResponsiveContainer>
       );
@@ -465,13 +520,23 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     // 7. HISTOGRAM (Frequency Distribution)
     case 'Histogram':
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={categoryData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 16 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
-            <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <XAxis
+              dataKey="name"
+              {...axisProps}
+              interval={0}
+              height={36}
+              tick={{ fill: 'var(--c-text-secondary)', fontSize: 10 }}
+            />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis="Frequency Count" xAxis="Range" />} />
-            <Bar dataKey="value" name="Frequency" fill="#06b6d4" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="value" name="Frequency" fill="#06b6d4" radius={[6, 6, 0, 0]}>
+              {data.map((_, index) => (
+                <Cell key={`hist-cell-${index}`} fill={COLORS[index % COLORS.length]} fillOpacity={0.85} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );
@@ -479,9 +544,9 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     // 8. TREEMAP (Hierarchical Breakdown)
     case 'Treemap':
       return (
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
           <Treemap
-            data={categoryData}
+            data={data}
             dataKey="value"
             aspectRatio={4 / 3}
             stroke="var(--c-bg)"
@@ -494,18 +559,23 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
 
     // 9. RADAR CHART (Multi-Dimensional Scoring)
     case 'Radar Chart':
-    case 'Radar':
+    case 'Radar': {
+      // Radar data uses 'subject' as the angle key and 'A' as the data key
+      // Backend sends {subject, A, value, fullMark} for radar charts
+      const radarDataKey = data[0]?.A !== undefined ? 'A' : 'value';
+      const radarAngleKey = data[0]?.subject !== undefined ? 'subject' : 'name';
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <RadarChart cx="50%" cy="50%" outerRadius="75%" data={categoryData}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <RadarChart cx="50%" cy="50%" outerRadius="75%" data={data}>
             <PolarGrid stroke="var(--c-glass-border)" />
-            <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--c-text-secondary)', fontSize: 11 }} />
+            <PolarAngleAxis dataKey={radarAngleKey} tick={{ fill: 'var(--c-text-secondary)', fontSize: 11 }} />
             <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
             <RechartsTooltip content={<PowerBiTooltip yAxis="Relative Score" xAxis="Dimension" />} />
-            <Radar name="Performance" dataKey="A" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.45} />
+            <Radar name="Performance" dataKey={radarDataKey} stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.45} />
           </RadarChart>
         </ResponsiveContainer>
       );
+    }
 
     // 10. HEATMAP (Matrix Density)
     case 'Heatmap':
@@ -518,11 +588,11 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     // 12. FUNNEL CHART
     case 'Funnel Chart':
       return (
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
           <FunnelChart>
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
-            <Funnel dataKey="value" data={categoryData} isAnimationActive>
-              {categoryData.map((_, index) => (
+            <Funnel dataKey="value" data={data} isAnimationActive>
+              {data.map((_, index) => (
                 <Cell key={`funnel-cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Funnel>
@@ -533,13 +603,17 @@ export const ChartRenderer = ({ type, data, xAxis, yAxis, secondaryDimension, ma
     // Default Fallback to Bar Chart
     default:
       return (
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={categoryData} margin={{ top: 12, right: 12, left: -16, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+          <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-glass-border)" opacity={0.6} />
             <XAxis dataKey="name" {...axisProps} />
-            <YAxis {...axisProps} />
+            <YAxis {...axisProps} tickFormatter={formatYAxisTick} domain={[0, 'auto']} />
             <RechartsTooltip content={<PowerBiTooltip yAxis={metricName} xAxis={xAxis} />} />
-            <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]}>
+              {data.map((_, index) => (
+                <Cell key={`default-cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );

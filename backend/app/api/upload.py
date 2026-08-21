@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import Response
 from app.agents.orchestrator import master_orchestrator
+from app.config import settings
 import io
 import pandas as pd
 
@@ -17,8 +18,19 @@ async def upload_dataset(file: UploadFile = File(...), sheet_name: str | None = 
 
     try:
         contents = await file.read()
+
+        # Enforce upload size limit
+        max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        if len(contents) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large ({len(contents) / (1024*1024):.1f}MB). Maximum allowed: {settings.MAX_UPLOAD_SIZE_MB}MB."
+            )
+
         result = master_orchestrator.process_file_and_generate_initial_dashboard(contents, file.filename, sheet_name)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing dataset: {str(e)}")
 

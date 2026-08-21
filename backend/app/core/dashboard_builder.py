@@ -44,7 +44,9 @@ class DashboardBuilder:
     def _number(value: Any) -> float:
         try:
             val = float(value)
-            return 0.0 if math.isnan(val) or math.isinf(val) else round(val, 2)
+            if math.isnan(val) or math.isinf(val):
+                return 0.0
+            return round(val, 4)
         except (ValueError, TypeError):
             return 0.0
 
@@ -93,16 +95,17 @@ class DashboardBuilder:
     def _format_value(value: float, metric_name: str = "", format_type: Optional[str] = None, unit: Optional[str] = None) -> str:
         """Format numbers dynamically across all domains (Healthcare, IoT, HR, Finance, etc.)."""
         if value is None or (isinstance(value, float) and math.isnan(value)):
-            return "—"
+            return "\u2014"
         num = float(value)
         fmt = (format_type or "").lower().strip()
         u = unit.strip() if unit else ""
 
-        is_currency = fmt == "currency" or u == "$" or (not fmt and any(kw in metric_name.lower() for kw in ["sales", "revenue", "profit", "price", "cost", "spend", "amount", "budget", "salary", "arr", "mrr"]))
-        is_pct = fmt == "percentage" or u == "%" or "rate" in metric_name.lower() or "pct" in metric_name.lower() or "percent" in metric_name.lower()
+        # Only mark as currency if explicitly told via format_type or unit — avoid false positives
+        is_currency = fmt == "currency" or u in ("$", "\u20ac", "\u00a3", "\u00a5")
+        is_pct = fmt == "percentage" or u == "%"
 
         if is_currency:
-            prefix, suffix = "$", ""
+            prefix, suffix = u if u in ("$", "\u20ac", "\u00a3", "\u00a5") else "$", ""
         elif is_pct:
             prefix, suffix = "", "%"
         elif u:
@@ -115,10 +118,12 @@ class DashboardBuilder:
             val_str = f"{num / 1_000_000_000:.2f}B"
         elif abs_val >= 1_000_000:
             val_str = f"{num / 1_000_000:.2f}M"
-        elif abs_val >= 1_000 and not is_pct:
+        elif abs_val >= 10_000 and not is_pct:
             val_str = f"{num / 1_000:.1f}K"
-        elif abs_val >= 100 or num.is_integer():
+        elif abs_val >= 100 or (num == int(num) and abs_val >= 1):
             val_str = f"{int(round(num)):,}"
+        elif abs_val < 0.01 and abs_val > 0:
+            val_str = f"{num:.4f}"
         else:
             val_str = f"{num:.2f}"
 
@@ -166,12 +171,14 @@ class DashboardBuilder:
             frame["_period"] = frame[date_col].dt.to_period("W")
 
         grouped = self._apply_aggregation(frame, metric, agg_func, grouped_by="_period").tail(36)
-        total_val = sum(grouped.values) or 1.0
+        # Compute percentage based on the displayed values (not the underlying raw total)
+        displayed_values = [self._number(v) for v in grouped.values]
+        total_displayed = sum(abs(v) for v in displayed_values) or 1.0
 
         series = []
         for period, value in grouped.items():
             num = self._number(value)
-            pct = round((num / total_val) * 100, 1) if total_val else 0.0
+            pct = round((abs(num) / total_displayed) * 100, 1) if total_displayed else 0.0
             series.append({
                 "name": str(period),
                 "value": num,
@@ -204,12 +211,14 @@ class DashboardBuilder:
         else:
             grouped = grouped.sort_values(ascending=False)
 
-        total_val = float(grouped.sum()) or 1.0
         top_items = grouped.head(max_items)
+        # Compute percentage based on the displayed subset values
+        displayed_values = [self._number(v) for v in top_items.values]
+        total_displayed = sum(abs(v) for v in displayed_values) or 1.0
         series = []
         for name, value in top_items.items():
             num = self._number(value)
-            pct = round((num / total_val) * 100, 1) if total_val else 0.0
+            pct = round((abs(num) / total_displayed) * 100, 1) if total_displayed else 0.0
             series.append({
                 "name": str(name),
                 "value": num,
@@ -284,23 +293,36 @@ class DashboardBuilder:
     def _histogram_series(self, df: pd.DataFrame, metric: str, format_type: Optional[str] = None, unit: Optional[str] = None) -> List[Dict[str, Any]]:
         if metric not in df.columns:
             return []
-        values = df[metric].dropna()
+        values = pd.to_numeric(df[metric], errors="coerce").dropna()
         if values.empty:
             return []
-        bins_count = min(12, max(4, int(np.sqrt(len(values)))))
-        counts, bins = np.histogram(values, bins=bins_count)
+
+        # Use 5 to 7 clean bins to avoid squished/overlapping labels
+        bins_count = 6 if len(values) >= 50 else min(5, max(3, len(values.unique())))
+        counts, bin_edges = np.histogram(values, bins=bins_count)
         data = []
+
+        is_all_ints = (values % 1 == 0).all()
+
         for i in range(len(counts)):
-            b_min = self._number(bins[i])
-            b_max = self._number(bins[i + 1])
-            label = f"{self._format_value(b_min, metric, format_type, unit)} - {self._format_value(b_max, metric, format_type, unit)}"
+            b_min = float(bin_edges[i])
+            b_max = float(bin_edges[i + 1])
+
+            if is_all_ints:
+                min_str = f"{int(round(b_min)):,}"
+                max_str = f"{int(round(b_max)):,}"
+            else:
+                min_str = self._format_value(self._number(b_min), metric, format_type, unit)
+                max_str = self._format_value(self._number(b_max), metric, format_type, unit)
+
+            label = f"{min_str} - {max_str}"
             data.append({
                 "name": label,
                 "value": int(counts[i]),
                 "count": int(counts[i]),
                 "range_min": b_min,
                 "range_max": b_max,
-                "formatted_value": f"{int(counts[i]):,} items",
+                "formatted_value": f"{int(counts[i]):,} records",
             })
         return data
 
@@ -604,6 +626,11 @@ class DashboardBuilder:
         categories = summary.get("categorical_columns", [])
         numeric = summary.get("numeric_columns", [])
 
+        # Determine metric's semantic aggregation
+        metric_lower = (metric or "").lower()
+        is_avg_metric = any(kw in metric_lower for kw in ['age', 'rating', 'score', 'temperature', 'heartrate', 'rate', 'pct', 'percentage', 'percent', 'ratio', 'margin', 'latency', 'tenure', 'gpa'])
+        default_agg = "mean" if is_avg_metric else "sum"
+
         plan: List[Dict[str, Any]] = []
 
         # 1. Primary Time Series
@@ -613,32 +640,39 @@ class DashboardBuilder:
                 "title": f"{metric} Trend over Time",
                 "x_axis": dates[0],
                 "y_axis": metric,
+                "aggregation": default_agg,
             })
 
         # 2. Primary Category Breakdown
         if categories and metric:
             plan.append({
                 "type": "Bar Chart",
-                "title": f"{metric} by {categories[0]}",
+                "title": f"Average {metric} by {categories[0]}" if default_agg == "mean" else f"{metric} by {categories[0]}",
                 "x_axis": categories[0],
                 "y_axis": metric,
+                "aggregation": default_agg,
             })
 
         # 3. Market Share / Donut
-        if len(categories) >= 2 and metric:
-            plan.append({
-                "type": "Donut Chart",
-                "title": f"{categories[1]} Share of {metric}",
-                "x_axis": categories[1],
-                "y_axis": metric,
-            })
-        elif categories and metric:
-            plan.append({
-                "type": "Donut Chart",
-                "title": f"{categories[0]} Contribution",
-                "x_axis": categories[0],
-                "y_axis": metric,
-            })
+        if categories:
+            cat_dim = categories[1] if len(categories) >= 2 else categories[0]
+            if default_agg == "sum" and metric:
+                plan.append({
+                    "type": "Donut Chart",
+                    "title": f"{cat_dim} Share of {metric}",
+                    "x_axis": cat_dim,
+                    "y_axis": metric,
+                    "aggregation": "sum",
+                })
+            else:
+                # For demographic/average metrics, Donut displays category record distribution count
+                plan.append({
+                    "type": "Donut Chart",
+                    "title": f"{cat_dim} Distribution",
+                    "x_axis": cat_dim,
+                    "y_axis": metric or "Records",
+                    "aggregation": "count",
+                })
 
         # 4. Distribution / Histogram
         if metric:
@@ -648,13 +682,15 @@ class DashboardBuilder:
                 "y_axis": metric,
             })
 
-        # 5. Correlation Scatter
+        # 5. Correlation Scatter (pick 2 numeric metrics, never ID)
         if len(numeric) >= 2:
+            x_m = numeric[0]
+            y_m = numeric[1]
             plan.append({
                 "type": "Scatterplot",
-                "title": f"{numeric[1]} vs {numeric[0]} Correlation",
-                "x_axis": numeric[0],
-                "y_axis": numeric[1],
+                "title": f"{y_m} vs {x_m} Correlation",
+                "x_axis": x_m,
+                "y_axis": y_m,
             })
         elif len(categories) >= 2 and metric and len(plan) < 5:
             plan.append({
@@ -662,6 +698,7 @@ class DashboardBuilder:
                 "title": f"{metric} by {categories[1]}",
                 "x_axis": categories[1],
                 "y_axis": metric,
+                "aggregation": default_agg,
             })
 
         return plan[:5]
@@ -678,6 +715,10 @@ class DashboardBuilder:
         dates = summary.get("date_columns", [])
         cats = summary.get("categorical_columns", [])
         numeric = summary.get("numeric_columns", [])
+
+        metric_lower = (metric or "").lower()
+        is_avg_metric = any(kw in metric_lower for kw in ['age', 'rating', 'score', 'temp', 'rate', 'pct', 'ratio', 'margin', 'latency', 'tenure'])
+        default_agg = "mean" if is_avg_metric else "sum"
 
         intent_metrics = (intent or {}).get("metrics", [])
         intent_dimensions = (intent or {}).get("dimensions", [])
@@ -711,7 +752,7 @@ class DashboardBuilder:
             comp_cols = comparison.get("columns", [])
             for c_metric in comp_cols:
                 if c_metric in numeric and selected_cat:
-                    plans.append({"type": "Bar Chart", "title": f"{c_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": c_metric})
+                    plans.append({"type": "Bar Chart", "title": f"{c_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": c_metric, "aggregation": default_agg})
             if len(comp_cols) >= 2 and all(c in numeric for c in comp_cols[:2]):
                 plans.append({"type": "Scatterplot", "title": f"{comp_cols[1]} vs {comp_cols[0]}", "x_axis": comp_cols[0], "y_axis": comp_cols[1]})
 
@@ -719,24 +760,24 @@ class DashboardBuilder:
         has_time = time_filter or any(w in lower for w in ["trend", "forecast", "over time", "month", "year", "growth", "quarter", "timeline", "sales forecast"])
         if has_time and dates and selected_metric:
             ctype = "Area Graph" if "area" in lower else "Line Graph"
-            plans.append({"type": ctype, "title": f"{selected_metric} Trend", "x_axis": dates[0], "y_axis": selected_metric})
+            plans.append({"type": ctype, "title": f"{selected_metric} Trend", "x_axis": dates[0], "y_axis": selected_metric, "aggregation": default_agg})
 
         # Top / Bottom
         if top_bottom and selected_cat and selected_metric:
             direction = top_bottom.get("direction", "top").title()
             n = top_bottom.get("n", 5)
-            plans.append({"type": "Bar Chart", "title": f"{direction} {n} {selected_cat} by {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric})
+            plans.append({"type": "Bar Chart", "title": f"{direction} {n} {selected_cat} by {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric, "aggregation": default_agg})
 
         # Stacked / Heatmap breakdown
         if selected_cat and second_cat and selected_metric and any(w in lower for w in ["breakdown", "stacked", "cross", "matrix", "segment"]):
-            plans.append({"type": "Stacked Bar Graph", "title": f"{selected_metric} by {selected_cat} & {second_cat}", "x_axis": selected_cat, "secondary_dimension": second_cat, "y_axis": selected_metric})
+            plans.append({"type": "Stacked Bar Graph", "title": f"{selected_metric} by {selected_cat} & {second_cat}", "x_axis": selected_cat, "secondary_dimension": second_cat, "y_axis": selected_metric, "aggregation": default_agg})
 
         # Category breakdown & Donut
         if selected_cat and selected_metric:
             if not any(p.get("type") == "Bar Chart" and p.get("x_axis") == selected_cat for p in plans):
-                plans.append({"type": "Bar Chart", "title": f"{selected_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": selected_metric})
+                plans.append({"type": "Bar Chart", "title": f"{selected_metric} by {selected_cat}", "x_axis": selected_cat, "y_axis": selected_metric, "aggregation": default_agg})
             if len(plans) < 5:
-                plans.append({"type": "Donut Chart", "title": f"{selected_cat} Share of {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric})
+                plans.append({"type": "Donut Chart", "title": f"{selected_cat} Share of {selected_metric}", "x_axis": selected_cat, "y_axis": selected_metric, "aggregation": default_agg})
 
         # Scatter
         if len(numeric) >= 2 and not any(p.get("type") == "Scatterplot" for p in plans) and len(plans) < 5:
@@ -745,8 +786,19 @@ class DashboardBuilder:
         return (plans or self.default_plan(summary))[:5]
 
     def make_kpis(self, df: pd.DataFrame, summary: Dict[str, Any], ai_kpi_spec: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        metric = (ai_kpi_spec.get("column") if ai_kpi_spec else None) or summary.get("primary_kpi") or "Records"
-        agg_func = (ai_kpi_spec.get("aggregation") if ai_kpi_spec else "sum") or "sum"
+        metric = (ai_kpi_spec.get("column") if ai_kpi_spec else None) or summary.get("primary_kpi") or (summary.get("numeric_columns") or ["Records"])[0]
+        
+        # Smart aggregation inference:
+        metric_lower = (metric or "").lower()
+        is_avg = any(kw in metric_lower for kw in ['age', 'rating', 'score', 'temp', 'temperature', 'rate', 'pct', 'percentage', 'ratio', 'margin', 'latency', 'tenure', 'gpa'])
+        
+        if ai_kpi_spec and ai_kpi_spec.get("aggregation"):
+            agg_func = ai_kpi_spec["aggregation"]
+        elif is_avg:
+            agg_func = "mean"
+        else:
+            agg_func = "sum"
+
         format_type = (ai_kpi_spec.get("format_type") if ai_kpi_spec else None) or summary.get("format_type")
         unit = (ai_kpi_spec.get("unit") if ai_kpi_spec else None) or summary.get("unit")
 
@@ -760,12 +812,17 @@ class DashboardBuilder:
         secondary_metric = (ai_kpi_spec.get("secondary_column") if ai_kpi_spec else None) or summary.get("secondary_kpi")
         secondary_val_str = "—"
         if secondary_metric and secondary_metric in df.columns:
-            sec_agg = (ai_kpi_spec.get("secondary_aggregation", "mean") if ai_kpi_spec else "mean")
+            sec_lower = secondary_metric.lower()
+            sec_default_agg = "mean" if any(kw in sec_lower for kw in ['age', 'rating', 'score', 'rate', 'pct', 'salary', 'income']) else "sum"
+            sec_agg = (ai_kpi_spec.get("secondary_aggregation") if ai_kpi_spec else None) or sec_default_agg
             sec_val = self._number(self._apply_aggregation(df, secondary_metric, sec_agg))
             secondary_val_str = self._format_value(sec_val, secondary_metric)
 
+        kpi_title = f"Avg {metric}" if (agg_func == "mean" and is_avg) else metric
+
         return {
-            "primary_kpi": metric,
+            "primary_kpi": kpi_title,
+            "metric_column": metric,
             "value": val,
             "formatted_value": formatted,
             "aggregation": agg_func,

@@ -149,39 +149,68 @@ class LocalDatasetProfiler:
                 col_meta["semantic_role"] = "date"
             # Numeric analysis
             elif pd.api.types.is_numeric_dtype(df[col]):
-                numeric_cols.append(str(col))
                 col_meta["mean"] = float(df[col].mean()) if not df[col].isnull().all() else 0.0
                 col_meta["std"] = float(df[col].std()) if not df[col].isnull().all() else 0.0
                 col_meta["min"] = float(df[col].min()) if not df[col].isnull().all() else 0.0
                 col_meta["max"] = float(df[col].max()) if not df[col].isnull().all() else 0.0
                 col_meta["median"] = float(df[col].median()) if not df[col].isnull().all() else 0.0
 
-                # KPI confidence scoring
-                is_id_like = bool(re.search(r'(^|_)(id|key|code|zip|postal|row|index|num|number)($|_)', col_lower))
-                is_discrete_date = bool(re.search(r'(^|_)(year|yr|month|day|quarter|qtr|week|hour|minute)($|_)', col_lower))
+                # Robust ID detection (handles 'User ID', 'user_id', 'ID', 'CustomerID', etc.)
+                is_id_like = bool(
+                    re.search(r'(^|[_\s\-])(id|key|code|zip|postal|row|index|num|number|identifier)($|[_\s\-])', col_lower)
+                    or col_lower.endswith((' id', '_id', '-id', ' key', '_key'))
+                    or col_lower.startswith(('id ', 'id_', 'id-'))
+                    or col_lower in ('id', 'userid', 'user_id', 'user id', 'customerid', 'customer_id', 'customer id', 'orderid', 'order_id', 'order id', 'patientid', 'patient_id', 'patient id')
+                )
+                is_discrete_date = bool(re.search(r'(^|[_\s\-])(year|yr|month|day|quarter|qtr|week|hour|minute)($|[_\s\-])', col_lower))
 
-                keyword_match = any(kw in col_lower for kw in kpi_kw)
                 unique_ratio = unique_count / row_count if row_count else 1.0
-                statistical_signal = (unique_ratio < 0.95) and (str(col) not in date_cols)
 
                 if is_id_like:
                     kpi_conf = 0.0
                     col_meta["semantic_role"] = "identifier"
+                    col_meta["default_aggregation"] = "count"
                 elif is_discrete_date:
                     kpi_conf = 0.0
                     col_meta["semantic_role"] = "temporal_discrete"
-                elif keyword_match and statistical_signal:
-                    kpi_conf = 1.0
-                    col_meta["semantic_role"] = "kpi"
-                elif keyword_match:
-                    kpi_conf = 0.8
-                    col_meta["semantic_role"] = "kpi"
-                elif statistical_signal and unique_count > 5:
-                    kpi_conf = 0.4
-                    col_meta["semantic_role"] = "measure"
+                    col_meta["default_aggregation"] = "count"
+                    numeric_cols.append(str(col))
                 else:
-                    kpi_conf = 0.0
-                    col_meta["semantic_role"] = "measure"
+                    numeric_cols.append(str(col))
+                    # Tiered KPI Scoring
+                    is_financial = any(kw in col_lower for kw in ['salary', 'estimatedsalary', 'estimated_salary', 'revenue', 'sales', 'profit', 'amount', 'price', 'cost', 'spend', 'income', 'budget', 'margin', 'clv', 'orders', 'transactions', 'balance'])
+                    is_target = any(kw in col_lower for kw in ['purchased', 'conversion', 'converted', 'churn', 'subscribed', 'target', 'clicks', 'bought'])
+                    is_rating = any(kw in col_lower for kw in ['rating', 'score', 'nps', 'csat', 'satisfaction', 'gpa', 'accuracy'])
+                    is_demographic = any(kw in col_lower for kw in ['age', 'height', 'weight', 'temp', 'temperature', 'heartrate', 'heart_rate', 'blood_pressure', 'tenure'])
+
+                    if is_financial:
+                        kpi_conf = 1.0
+                        col_meta["semantic_role"] = "kpi"
+                        col_meta["default_aggregation"] = "sum"
+                    elif is_target:
+                        kpi_conf = 0.85
+                        col_meta["semantic_role"] = "kpi"
+                        col_meta["default_aggregation"] = "mean"
+                    elif is_rating:
+                        kpi_conf = 0.75
+                        col_meta["semantic_role"] = "kpi"
+                        col_meta["default_aggregation"] = "mean"
+                    elif is_demographic:
+                        kpi_conf = 0.35
+                        col_meta["semantic_role"] = "measure"
+                        col_meta["default_aggregation"] = "mean"
+                    elif any(kw in col_lower for kw in kpi_kw):
+                        kpi_conf = 0.6
+                        col_meta["semantic_role"] = "kpi"
+                        col_meta["default_aggregation"] = "sum"
+                    elif unique_count > 5:
+                        kpi_conf = 0.25
+                        col_meta["semantic_role"] = "measure"
+                        col_meta["default_aggregation"] = "sum"
+                    else:
+                        kpi_conf = 0.1
+                        col_meta["semantic_role"] = "measure"
+                        col_meta["default_aggregation"] = "count"
 
                 col_meta["kpi_confidence"] = round(kpi_conf, 2)
                 if kpi_conf > 0.0:

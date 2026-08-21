@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   LayoutDashboard, Database, MessageSquare, LineChart, FileText, Settings, 
-  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Play, Download, Copy, Check, BarChart2,
+  ChevronLeft, Sparkles, Maximize2, X, AlertCircle, TrendingUp, ChevronDown, Upload, Plus, Trash2, Search, Download, Copy, Check, BarChart2,
   Clock, Activity, Cpu, Zap, Loader2
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
@@ -226,18 +226,26 @@ const ReportModal = ({ isOpen, onClose, report, datasetName }) => {
   return (
     <div className="modal-backdrop glass-panel" style={{
       position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px'
+      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+      boxSizing: 'border-box'
     }}>
       <section className="glass-panel animate-fade-in-up" style={{
-        width: 'min(820px, 100%)', maxHeight: '85vh', overflow: 'hidden',
-        borderRadius: '24px', padding: '28px', background: 'var(--c-bg)',
-        border: '1px solid var(--c-glass-border)', display: 'flex', flexDirection: 'column'
+        width: 'min(860px, 95vw)', maxHeight: '85vh',
+        borderRadius: '20px', padding: '24px 28px', background: 'var(--c-bg)',
+        border: '1px solid var(--c-glass-border)', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', boxSizing: 'border-box',
+        overflow: 'hidden'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--c-glass-border)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--c-glass-border)', paddingBottom: '14px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <FileText size={20} color="var(--c-accent-blue)" />
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Executive Analysis Report</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700 }}>Executive Analysis Report</h3>
+            {datasetName && (
+              <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(139,92,246,0.12)', color: 'var(--c-accent-purple)', fontWeight: 500 }}>
+                {datasetName}
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button className="btn btn-glass" onClick={handleCopy} style={{ padding: '6px 12px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -252,8 +260,9 @@ const ReportModal = ({ isOpen, onClose, report, datasetName }) => {
         </div>
 
         <div style={{
-          flex: 1, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.7,
-          color: 'var(--c-text)', fontSize: '0.92rem', paddingRight: '8px',
+          flex: 1, minHeight: 0, overflowY: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.7,
+          color: 'var(--c-text)', fontSize: '0.92rem', paddingRight: '12px',
+          wordBreak: 'break-word', overflowWrap: 'break-word',
           fontFamily: 'system-ui, -apple-system, sans-serif'
         }}>
           {report || 'Upload a dataset and ask analytical questions to generate an executive report.'}
@@ -368,21 +377,35 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     }
   };
 
-  const handleLoadSampleData = async () => {
-    setIsUploading(true);
-    try {
-      const resp = await fetch('/sample_sales.csv');
-      const text = await resp.text();
-      const blob = new Blob([text], { type: 'text/csv' });
-      const file = new File([blob], 'sample_sales.csv', { type: 'text/csv' });
-
-      const res = await uploadDataset(file);
-      processDatasetResult(res, 'sample_sales.csv');
-    } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: `Sample data loading error: ${err.message}` }]);
-    } finally {
-      setIsUploading(false);
+  // Dynamic suggested prompts derived from the actual dataset schema
+  const getSuggestedPrompts = () => {
+    if (!datasetSummary) {
+      return [
+        { label: 'Upload a dataset to get started', prompt: '' },
+      ];
     }
+    const kpi = datasetSummary.primary_kpi || 'primary metric';
+    const dates = datasetSummary.date_columns || [];
+    const cats = datasetSummary.categorical_columns || [];
+    const nums = datasetSummary.numeric_columns || [];
+    const prompts = [];
+
+    prompts.push({ label: `Give me a complete overview of the dataset`, prompt: 'Give me a complete overview and analysis of the entire dataset' });
+
+    if (dates.length > 0) {
+      prompts.push({ label: `Show ${kpi} trend over time`, prompt: `Show the trend of ${kpi} over ${dates[0]}` });
+    }
+    if (cats.length > 0) {
+      prompts.push({ label: `Compare ${kpi} by ${cats[0]}`, prompt: `Compare ${kpi} across ${cats[0]} with a breakdown` });
+    }
+    if (nums.length >= 2) {
+      prompts.push({ label: `Correlate ${nums[0]} vs ${nums[1]}`, prompt: `Analyze the correlation between ${nums[0]} and ${nums[1]}` });
+    }
+    if (cats.length >= 2) {
+      prompts.push({ label: `Segment ${kpi} by ${cats[0]} & ${cats[1]}`, prompt: `Show ${kpi} segmented by ${cats[0]} and ${cats[1]} with a stacked breakdown` });
+    }
+
+    return prompts.slice(0, 3);
   };
 
   const processDatasetResult = (res, filename) => {
@@ -469,7 +492,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
 
     if (!datasetId) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: 'Please upload a CSV/Excel dataset or load the sample data first to run analytical queries.' }]);
+      setChatHistory(prev => [...prev, { role: 'ai', text: 'Please upload a CSV or Excel dataset to begin your analysis and ask analytical queries.' }]);
       return;
     }
 
@@ -650,7 +673,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
                     <div className="ai-active-pill glass-panel">
                       <div className="ai-pulse-dot" />
                       <span className="ai-active-title">
-                        {isUploading ? 'Ingesting Dataset' : 'Nemotron-3 Ultra 550B'}
+                        {isUploading ? 'Ingesting Dataset' : 'Nemotron-3 Ultra'}
                       </span>
                       <span className="ai-active-step">
                         {isUploading
@@ -667,25 +690,21 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
                 </div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--c-text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>{currentFileName || 'No dataset loaded'}</span>
-                  {planSource && (
+                  {currentFileName && (
                     <span style={{
                       fontSize: '0.72rem', padding: '2px 8px', borderRadius: '999px',
-                      background: planSource === 'llm' ? 'rgba(139,92,246,0.15)' : 'rgba(245,158,11,0.15)',
-                      color: planSource === 'llm' ? 'var(--c-accent-purple)' : '#f59e0b',
-                      border: `1px solid ${planSource === 'llm' ? 'rgba(139,92,246,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                      background: 'rgba(139,92,246,0.15)',
+                      color: 'var(--c-accent-purple)',
+                      border: '1px solid rgba(139,92,246,0.3)',
                       fontWeight: 600,
                     }}>
-                      {planSource === 'llm' ? '✨ Nemotron-3 Ultra 550B' : '⚙️ Rule-based fallback'}
+                      ✨ Nemotron-3 Ultra 550B
                     </span>
                   )}
                 </div>
               </div>
 
               <div className="header-actions">
-                <button className="btn btn-glass" onClick={handleLoadSampleData} style={{ gap: '6px' }} disabled={isUploading || isThinking}>
-                  <Play size={15} color="var(--c-accent-emerald)" /> Sample CSV
-                </button>
-
                 <label className="btn btn-glass" style={{ cursor: isUploading || isThinking ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: isUploading || isThinking ? 0.7 : 1 }}>
                   <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload CSV/Excel'}
                   <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} style={{ display: 'none' }} disabled={isUploading || isThinking} />
@@ -703,50 +722,50 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
 
             {/* Top KPI Cards Row */}
             <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '16px', marginBottom: '20px'
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '12px', marginBottom: '14px', flexShrink: 0
             }}>
-              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+              <div className="glass-panel" style={{ padding: '12px 16px', borderRadius: '14px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
                   PRIMARY KPI ({kpiSummary.primary_kpi})
                 </span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--c-accent-blue)' }}>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--c-accent-blue)' }}>
                   {kpiSummary.value}
                 </div>
               </div>
 
               {kpiSummary.secondary_kpi ? (
-                <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+                <div className="glass-panel" style={{ padding: '12px 16px', borderRadius: '14px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
                     SECONDARY KPI ({kpiSummary.secondary_kpi})
                   </span>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-emerald)' }}>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '2px', color: 'var(--c-accent-emerald)' }}>
                     {kpiSummary.secondary_value || '—'}
                   </div>
                 </div>
               ) : (
-                <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>CLEANED RECORDS</span>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                <div className="glass-panel" style={{ padding: '12px 16px', borderRadius: '14px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>CLEANED RECORDS</span>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '2px' }}>
                     {kpiSummary.total_rows}
                   </div>
                 </div>
               )}
 
-              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+              <div className="glass-panel" style={{ padding: '12px 16px', borderRadius: '14px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
                   {kpiSummary.secondary_kpi ? 'CLEANED RECORDS' : 'DATA QUALITY SCORE'}
                 </span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: kpiSummary.secondary_kpi ? 'var(--c-text)' : 'var(--c-accent-emerald)' }}>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '2px', color: kpiSummary.secondary_kpi ? 'var(--c-text)' : 'var(--c-accent-emerald)' }}>
                   {kpiSummary.secondary_kpi ? kpiSummary.total_rows : `${kpiSummary.data_quality}%`}
                 </div>
               </div>
 
-              <div className="glass-panel" style={{ padding: '16px', borderRadius: '16px' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
+              <div className="glass-panel" style={{ padding: '12px 16px', borderRadius: '14px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--c-text-secondary)', fontWeight: 600 }}>
                   {forecast?.projected_growth_rate ? 'PROJECTED GROWTH RATE' : 'DATA INTEGRITY'}
                 </span>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px', color: 'var(--c-accent-purple)' }}>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '2px', color: 'var(--c-accent-purple)' }}>
                   {forecast?.projected_growth_rate || `${kpiSummary.data_quality}%`}
                 </div>
               </div>
@@ -759,7 +778,7 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
                   <div className="banner-left">
                     <Sparkles size={18} color="var(--c-accent-purple)" className="animate-spin-slow" />
                     <div>
-                      <div className="banner-text">NVIDIA Nemotron-3 Ultra 550B is formulating visual intelligence...</div>
+                      <div className="banner-text">Nemotron-3 Ultra 550B is formulating visual intelligence...</div>
                       <div className="banner-subtext">
                         {activeReasoningText 
                           ? 'Streaming live thoughts, verifying column axes, and calculating distributions...' 
@@ -772,45 +791,58 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
                   </div>
                 </div>
               )}
+              <div className="charts-grid">
+                {activeCharts.map((chart) => (
+                  <ChartCard 
+                    key={chart.id}
+                    chart={chart}
+                    isExpanded={expandedCard === chart.id} 
+                    onToggleExpand={handleToggleExpand} 
+                    onRemove={handleRemoveChart}
+                    onTypeChange={handleTypeChange}
+                  />
+                ))}
 
-              {activeCharts.map((chart) => (
-                <ChartCard 
-                  key={chart.id}
-                  chart={chart}
-                  isExpanded={expandedCard === chart.id} 
-                  onToggleExpand={handleToggleExpand} 
-                  onRemove={handleRemoveChart}
-                  onTypeChange={handleTypeChange}
-                />
-              ))}
-
-              {!activeCharts.length && !isUploading && (
-                <div className="recommendation-card liquid-glass" style={{ gridColumn: '1 / -1', padding: '32px', textAlign: 'center' }}>
-                  <Database size={36} color="var(--c-accent-purple)" style={{ margin: '0 auto 12px' }} />
-                  <h3 style={{ fontSize: '1.2rem', marginBottom: '8px' }}>Ready to Analyze Your Data</h3>
-                  <p style={{ fontSize: '0.9rem', color: 'var(--c-text-secondary)', maxWidth: '480px', margin: '0 auto' }}>
-                    Upload any CSV or Excel file, or click "Sample CSV" above. The application will automatically execute automated EDA, data cleaning, and Nemotron-powered dashboard visual generation.
-                  </p>
-                </div>
-              )}
-              
-              {/* Recommendation Card */}
-              {activeCharts.length > 0 && (
-                <div className="recommendation-card liquid-glass">
-                  <div className="rec-header">
-                    <Sparkles size={18} color="var(--c-accent-purple)" />
-                    <h3>Automated Insights & Recommendations</h3>
+                {!activeCharts.length && !isUploading && (
+                  <div className="recommendation-card liquid-glass" style={{ gridColumn: '1 / -1', padding: '32px', textAlign: 'center' }}>
+                    <Database size={36} color="var(--c-accent-purple)" style={{ margin: '0 auto 12px' }} />
+                    <h3 style={{ fontSize: '1.2rem', marginBottom: '8px' }}>Ready to Analyze Your Data</h3>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--c-text-secondary)', maxWidth: '480px', margin: '0 auto' }}>
+                      Upload any CSV or Excel file to begin. The AI analytics engine will automatically execute automated EDA, data cleaning, and intelligent visual dashboard generation.
+                    </p>
                   </div>
-                  <ul style={{ paddingLeft: '18px', fontSize: '0.88rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {recommendations.map((rec, i) => (
-                      <li key={i}>{rec}</li>
+                )}
+              </div>
+              
+              {/* Executive Insights & Recommendations Section */}
+              {activeCharts.length > 0 && recommendations && recommendations.filter(r => r && typeof r === 'string' && r.trim().length > 0).length > 0 && (
+                <section className="recommendation-card">
+                  <div className="rec-header">
+                    <div className="rec-header-left">
+                      <div className="rec-icon-badge">
+                        <Sparkles size={20} color="var(--c-accent-purple)" />
+                      </div>
+                      <div>
+                        <h3 className="rec-title">Automated Insights & Strategic Recommendations</h3>
+                        <p className="rec-subtitle">AI-synthesized domain patterns, performance drivers, and executive actions</p>
+                      </div>
+                    </div>
+                    <button className="btn btn-glass rec-action-btn" onClick={() => setIsReportOpen(true)}>
+                      <FileText size={15} color="var(--c-accent-blue)" /> View Full Report
+                    </button>
+                  </div>
+                  <div className="rec-grid">
+                    {recommendations.filter(r => r && typeof r === 'string' && r.trim().length > 0).map((rec, i) => (
+                      <div key={i} className="rec-insight-card">
+                        <div className="rec-card-num">0{i + 1}</div>
+                        <p className="rec-card-text">{rec}</p>
+                      </div>
                     ))}
-                  </ul>
-                  <button className="btn btn-primary" style={{marginTop: '16px', width: '100%'}} onClick={() => setIsReportOpen(true)}>
-                    View Executive Report
-                  </button>
-                </div>
+                  </div>
+                </section>
               )}
+              {/* Spacer to guarantee scroll visibility */}
+              <div style={{ gridColumn: '1 / -1', height: '32px' }} />
             </div>
           </>
         ) : (
@@ -946,15 +978,17 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
         </div>
 
         <div className="suggested-prompts">
-          <button onClick={() => handlePromptClick("i want the insights of sales for the current year with respect to everything in the dataset")}>
-            "Insights of sales for current year with respect to everything"
-          </button>
-          <button onClick={() => handlePromptClick("Compare sales and profit across regions with stacked category breakdown")}>
-            "Compare sales & profit by region with stacked breakdown"
-          </button>
-          <button onClick={() => handlePromptClick("Forecast next 4 quarters with 95% confidence intervals")}>
-            "Forecast next 4 quarters with 95% confidence intervals"
-          </button>
+          {getSuggestedPrompts().map((sp, idx) => (
+            sp.prompt ? (
+              <button key={idx} onClick={() => handlePromptClick(sp.prompt)}>
+                {sp.label}
+              </button>
+            ) : (
+              <button key={idx} disabled style={{ opacity: 0.5, cursor: 'default' }}>
+                {sp.label}
+              </button>
+            )
+          ))}
         </div>
 
         <form className="chat-input-area" onSubmit={handleChatSubmit}>

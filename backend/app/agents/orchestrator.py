@@ -435,7 +435,7 @@ class MasterOrchestrator:
         forecast = self._forecast_for_dataset(cleaned_df, summary)
 
         if not insights:
-            insights = self._initial_insights(summary, cleaning_report, charts)
+            insights = self._initial_insights(summary, cleaning_report, charts, use_llm=(arch_source == "llm"))
 
         return {
             "status": "success",
@@ -451,10 +451,11 @@ class MasterOrchestrator:
             "plan_source": arch_source,
         }
 
-    def _initial_insights(self, summary: Dict[str, Any], cleaning: Dict[str, Any], charts: List[Dict[str, Any]]) -> List[str]:
-        llm_bullets, source = nemotron_client.generate_initial_insights(summary, cleaning)
-        if source == "llm" and llm_bullets:
-            return llm_bullets
+    def _initial_insights(self, summary: Dict[str, Any], cleaning: Dict[str, Any], charts: List[Dict[str, Any]], use_llm: bool = True) -> List[str]:
+        if use_llm:
+            llm_bullets, source = nemotron_client.generate_initial_insights(summary, cleaning)
+            if source == "llm" and llm_bullets:
+                return llm_bullets
         primary = summary.get("primary_kpi") or "primary metric"
         return [
             f"Successfully cleansed {cleaning.get('cleaned_rows', summary.get('row_count', 0)):,} rows across {summary.get('column_count', 0)} attributes.",
