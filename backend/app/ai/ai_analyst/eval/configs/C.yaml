@@ -1,0 +1,4 @@
+name: C
+task_split: dates_nulls_and_casing
+verifier_family: hybrid
+models: {router: offline, planner: offline, sql_gen: offline, verifier: hybrid, synthesizer: offline}

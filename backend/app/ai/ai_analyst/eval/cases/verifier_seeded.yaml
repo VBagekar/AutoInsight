@@ -1,0 +1,32 @@
+schema_version: 1
+cases:
+  - {id: wrong-01, question: total amount, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales", verdict: incorrect, issue: wrong_aggregation}}
+  - {id: wrong-02, question: average amount, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales", verdict: incorrect, issue: wrong_aggregation}}
+  - {id: wrong-03, question: north total, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales WHERE region='South'", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-04, question: join customers, dataset: seeded, pair: {sql: "SELECT * FROM sales", verdict: incorrect, issue: missing_condition}}
+  - {id: wrong-05, question: missing amount count, dataset: seeded, pair: {sql: "SELECT COUNT(amount) FROM sales", verdict: incorrect, issue: wrong_aggregation}}
+  - {id: wrong-06, question: January amount, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-07, question: largest amount, dataset: seeded, pair: {sql: "SELECT MIN(amount) FROM sales", verdict: incorrect, issue: wrong_aggregation}}
+  - {id: wrong-08, question: customer spend, dataset: seeded, pair: {sql: "SELECT region, SUM(amount) FROM sales GROUP BY region", verdict: incorrect, issue: wrong_column}}
+  - {id: wrong-09, question: no customer sales, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales JOIN customers USING(customer_id)", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-10, question: orders in March, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales WHERE sale_date < '2024-03-01'", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-11, question: books total, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales WHERE category='Games'", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-12, question: date null, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales WHERE sale_date IS NOT NULL", verdict: incorrect, issue: wrong_filter}}
+  - {id: wrong-13, question: grouped category, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales", verdict: incorrect, issue: wrong_grain}}
+  - {id: wrong-14, question: top customer, dataset: seeded, pair: {sql: "SELECT customer_id FROM customers LIMIT 1", verdict: incorrect, issue: missing_condition}}
+  - {id: wrong-15, question: target join, dataset: seeded, pair: {sql: "SELECT * FROM sales", verdict: incorrect, issue: wrong_column}}
+  - {id: correct-01, question: total amount, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales", verdict: correct}}
+  - {id: correct-02, question: count orders, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales", verdict: correct}}
+  - {id: correct-03, question: average amount, dataset: seeded, pair: {sql: "SELECT AVG(amount) FROM sales", verdict: correct}}
+  - {id: correct-04, question: north total, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales WHERE lower(region)='north'", verdict: correct}}
+  - {id: correct-05, question: missing amount, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales WHERE amount IS NULL", verdict: correct}}
+  - {id: correct-06, question: January amount, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales WHERE sale_date BETWEEN '2024-01-01' AND '2024-01-31'", verdict: correct}}
+  - {id: correct-07, question: largest amount, dataset: seeded, pair: {sql: "SELECT MAX(amount) FROM sales", verdict: correct}}
+  - {id: correct-08, question: join customers, dataset: seeded, pair: {sql: "SELECT s.order_id,c.customer_name FROM sales s JOIN customers c USING(customer_id)", verdict: correct}}
+  - {id: correct-09, question: no customer sales, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales s LEFT JOIN customers c USING(customer_id) WHERE c.customer_id IS NULL", verdict: correct}}
+  - {id: correct-10, question: March orders, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales WHERE sale_date >= '2024-03-01'", verdict: correct}}
+  - {id: correct-11, question: books total, dataset: seeded, pair: {sql: "SELECT SUM(amount) FROM sales WHERE lower(category)='books'", verdict: correct}}
+  - {id: correct-12, question: date null, dataset: seeded, pair: {sql: "SELECT COUNT(*) FROM sales WHERE sale_date IS NULL", verdict: correct}}
+  - {id: correct-13, question: grouped category, dataset: seeded, pair: {sql: "SELECT category,COUNT(*) FROM sales GROUP BY category", verdict: correct}}
+  - {id: correct-14, question: target join, dataset: seeded, pair: {sql: "SELECT s.region,t.target FROM sales s LEFT JOIN targets t USING(region)", verdict: correct}}
+  - {id: correct-15, question: top customer, dataset: seeded, pair: {sql: "SELECT customer_id,SUM(amount) FROM sales GROUP BY customer_id ORDER BY 2 DESC LIMIT 1", verdict: correct}}

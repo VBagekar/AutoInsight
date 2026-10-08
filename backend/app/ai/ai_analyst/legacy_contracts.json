@@ -1,0 +1,15 @@
+{
+  "phase": 5,
+  "removals": 0,
+  "endpoints": [
+    {"method": "POST", "path": "/api/upload", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "POST", "path": "/api/query", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "GET", "path": "/api/dataset/{dataset_id}/preview", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "GET", "path": "/api/dataset/{dataset_id}/download", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "POST", "path": "/api/dataset/{dataset_id}/preprocess", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "POST", "path": "/api/forecast", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false},
+    {"method": "GET", "path": "/api/health", "verdict": "KEEP-COMPAT", "analyst_service_preserves": false}
+  ],
+  "frontend_callers": ["src/api/client.js", "src/components/Dashboard.jsx"],
+  "adapter_policy": "No adapter or removal: legacy dashboard, mutable dataset, forecast, health, and SSE shapes cannot be safely represented by AnalystService."
+}

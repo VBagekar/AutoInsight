@@ -1,0 +1,4 @@
+name: B
+task_split: adversarial_and_joins
+verifier_family: llm
+models: {router: offline, planner: offline, sql_gen: offline, verifier: llm, synthesizer: offline}

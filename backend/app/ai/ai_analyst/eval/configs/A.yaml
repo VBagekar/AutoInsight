@@ -1,0 +1,4 @@
+name: A
+task_split: core
+verifier_family: deterministic
+models: {router: offline, planner: offline, sql_gen: offline, verifier: seeded, synthesizer: offline}

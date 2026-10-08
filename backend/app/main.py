@@ -18,6 +18,7 @@ if str(backend_dir) not in sys.path:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import upload, query, forecast, preprocess
+from app.ai.ai_analyst.routes import router as ai_analyst_router
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ app.include_router(upload.router, prefix="/api", tags=["Upload & Profiling"])
 app.include_router(query.router, prefix="/api", tags=["AI Query & Reasoning"])
 app.include_router(forecast.router, prefix="/api", tags=["Forecasting"])
 app.include_router(preprocess.router, prefix="/api", tags=["Preprocessing"])
+app.include_router(ai_analyst_router, prefix="/api", tags=["AI Analyst"])
 
 
 @app.get("/")

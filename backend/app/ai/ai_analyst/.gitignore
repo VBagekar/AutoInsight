@@ -1,0 +1,7 @@
+data/
+*.duckdb
+*.card.json
+*.owner.json
+*.csv
+*.xlsx
+*.jsonl
