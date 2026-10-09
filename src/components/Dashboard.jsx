@@ -5,7 +5,7 @@ import {
   Clock, Activity, Cpu, Zap, Loader2
 } from 'lucide-react';
 import { ChartRenderer, CATEGORIZED_CHARTS, AVAILABLE_CHARTS } from './ChartComponents';
-import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset, downloadDataset, fetchHealth } from '../api/client';
+import { uploadDataset, streamAIQuery, fetchDatasetPreview, preprocessDataset, downloadDataset, fetchHealth, exportReportPDF } from '../api/client';
 import './Dashboard.css';
 
 // Chart Chooser Dropdown Component for single cards
@@ -474,6 +474,27 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
     }
   };
 
+  const handleExportPDF = async () => {
+    if (!datasetId) return;
+    setIsDownloading(true);
+    try {
+      const fallback = currentFileName ? `${currentFileName.replace(/\.[^/.]+$/, "")}_executive_report.pdf` : 'executive_report.pdf';
+      await exportReportPDF(datasetId, chatInput || undefined, detailedReport, fallback, activeCharts);
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        text: '📄 Successfully exported executive report as PDF.' 
+      }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        text: `PDF Export Error: ${err.message}`, 
+        type: 'error' 
+      }]);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const preprocessKeywords = [
     "add a column","add column","drop column","remove column","rename column","fill missing","fill in missing","change type","convert column","filter rows","filter out"
   ];
@@ -712,6 +733,11 @@ const Dashboard = ({ onBack, toggleTheme, theme }) => {
 
                 <button className="btn btn-glass" onClick={() => setIsReportOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>
                   <FileText size={16} /> Executive Report
+                </button>
+
+                <button className="btn btn-glass" onClick={handleExportPDF} style={{ gap: '6px' }} disabled={!datasetId || isDownloading}>
+                  {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                  {isDownloading ? 'Generating PDF...' : 'Export PDF'}
                 </button>
 
                 <button className="btn btn-primary" onClick={() => setIsAddModalOpen(true)} style={{ gap: '6px' }} disabled={!datasetId}>

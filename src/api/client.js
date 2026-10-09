@@ -191,3 +191,38 @@ export const fetchHealth = async () => {
     return { llm_configured: false, llm_reachable: false, model: '' };
   }
 };
+
+// ---------------------------------------------------------------------------
+// Export PDF Report
+// ---------------------------------------------------------------------------
+export const exportReportPDF = async (datasetId, query = null, reportText = null, fallbackName = 'executive_report.pdf', charts = []) => {
+  const response = await fetch(`${BASE_URL}/report/export-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_id: datasetId, query, report_text: reportText, charts }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Failed to export PDF report' }));
+    throw new Error(err.detail || `Export failed (HTTP ${response.status})`);
+  }
+
+  let filename = fallbackName;
+  const disposition = response.headers.get('Content-Disposition');
+  if (disposition && disposition.includes('filename=')) {
+    const match = disposition.match(/filename=["']?([^"']+)["']?/);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
