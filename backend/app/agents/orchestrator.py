@@ -401,13 +401,56 @@ class MasterOrchestrator:
             "filename": filename,
         }
 
-        # Generate initial dashboard via NVIDIA Nemotron-3 Ultra 550B
+        # Generate deterministic initial dashboard using local profiling only (no LLM calls)
+        kpi_spec = {
+            "column": summary.get("primary_kpi"),
+            "aggregation": "sum",
+            "format_type": "currency" if any(kw in (summary.get("primary_kpi") or "").lower() for kw in ['revenue', 'sales', 'profit', 'amount', 'price', 'cost', 'spend', 'income', 'budget', 'margin']) else None,
+            "unit": "$" if any(kw in (summary.get("primary_kpi") or "").lower() for kw in ['revenue', 'sales', 'profit', 'amount', 'price', 'cost', 'spend', 'income', 'budget', 'margin']) else None,
+        }
+        dashboard_title = f"{summary.get('primary_kpi', 'Key Metric')} Overview & Analytics"
+
+        charts = []
+        for index, spec in enumerate(dashboard_builder.default_plan(summary)):
+            chart = dashboard_builder.materialize_chart(cleaned_df, summary, spec, f"initial-{index + 1}")
+            if chart:
+                charts.append(chart)
+
+        kpis = dashboard_builder.make_kpis(cleaned_df, summary, kpi_spec)
+        forecast = self._forecast_for_dataset(cleaned_df, summary)
+        insights = self._initial_insights(summary, cleaning_report, charts, use_llm=False)
+
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "dashboard_title": dashboard_title,
+            "summary": summary,
+            "cleaning_report": cleaning_report,
+            "charts": charts,
+            "kpi_summary": kpis,
+            "forecast": forecast,
+            "ai_insights": insights,
+            "available_sheets": available_sheets,
+            "plan_source": "deterministic",
+        }
+
+    async def trigger_deep_llm_analysis(self, dataset_id: str) -> Dict[str, Any]:
+        """Trigger deep LLM analysis asynchronously - called by Copilot after dashboard mounts."""
+        dataset = self.datasets.get(dataset_id)
+        if not dataset:
+            return {"error": "Dataset not found"}
+
+        summary = dataset["summary"]
+        cleaned_df = dataset["df"]
+        cleaning_report = dataset["cleaning_report"]
+
+        # Generate LLM architecture
         ai_arch, arch_source = nemotron_client.generate_initial_dataset_architecture(summary, summary.get("sample_records"))
 
-        dashboard_title = None
         charts = []
         kpi_spec = None
         insights = []
+        dashboard_title = None
 
         if arch_source == "llm" and ai_arch:
             dashboard_title = ai_arch.get("dashboard_title")
@@ -418,36 +461,33 @@ class MasterOrchestrator:
 
             raw_charts = ai_arch.get("charts", [])
             for index, spec in enumerate(raw_charts):
-                chart = dashboard_builder.materialize_chart(cleaned_df, summary, spec, f"initial-{index + 1}")
+                chart = dashboard_builder.materialize_chart(cleaned_df, summary, spec, f"llm-{index + 1}")
                 if chart:
                     charts.append(chart)
 
             insights = ai_arch.get("insights", [])
 
-        # Fallback to deterministic layout if LLM produced no charts
+        # Fallback to deterministic if LLM failed
         if not charts:
             for index, spec in enumerate(dashboard_builder.default_plan(summary)):
-                chart = dashboard_builder.materialize_chart(cleaned_df, summary, spec, f"initial-{index + 1}")
+                chart = dashboard_builder.materialize_chart(cleaned_df, summary, spec, f"fallback-{index + 1}")
                 if chart:
                     charts.append(chart)
 
-        kpis = dashboard_builder.make_kpis(cleaned_df, summary, kpi_spec)
-        forecast = self._forecast_for_dataset(cleaned_df, summary)
-
         if not insights:
             insights = self._initial_insights(summary, cleaning_report, charts, use_llm=(arch_source == "llm"))
+
+        kpis = dashboard_builder.make_kpis(cleaned_df, summary, kpi_spec)
+        forecast = self._forecast_for_dataset(cleaned_df, summary)
 
         return {
             "status": "success",
             "dataset_id": dataset_id,
             "dashboard_title": dashboard_title or f"{kpis['primary_kpi']} Overview & Analytics",
-            "summary": summary,
-            "cleaning_report": cleaning_report,
             "charts": charts,
             "kpi_summary": kpis,
             "forecast": forecast,
             "ai_insights": insights,
-            "available_sheets": available_sheets,
             "plan_source": arch_source,
         }
 

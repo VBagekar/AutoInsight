@@ -11,7 +11,8 @@ router = APIRouter()
 async def upload_dataset(file: UploadFile = File(...), sheet_name: str | None = Query(default=None)):
     """
     Receives CSV dataset upload, parses schema & stats locally using Pandas/DuckDB,
-    and returns dataset profile + auto-generated initial dashboard.
+    and returns dataset profile + auto-generated initial dashboard deterministically (no LLM calls).
+    Returns in under 2 seconds for instant UI loading.
     """
     if not file.filename or not file.filename.lower().endswith(('.csv', '.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Upload a CSV or Excel (.xlsx/.xls) dataset.")
@@ -33,6 +34,21 @@ async def upload_dataset(file: UploadFile = File(...), sheet_name: str | None = 
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing dataset: {str(e)}")
+
+
+@router.post("/dataset/{dataset_id}/analyze")
+async def trigger_deep_analysis(dataset_id: str):
+    """
+    Trigger deep LLM analysis asynchronously - called by Copilot after dashboard mounts.
+    This endpoint performs the heavy LLM reasoning (planner, verifier, synthesizer)
+    that was removed from the initial upload for instant response.
+    """
+    try:
+        result = await master_orchestrator.trigger_deep_llm_analysis(dataset_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error triggering deep analysis: {str(e)}")
+
 
 @router.get("/dataset/{dataset_id}/preview")
 async def preview_dataset(dataset_id: str, page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=1, le=500)):
